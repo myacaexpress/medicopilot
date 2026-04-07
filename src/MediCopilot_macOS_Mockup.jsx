@@ -54,7 +54,7 @@ function useDraggable(ix, iy) {
 }
 
 // ─── Resizable (desktop only) ───
-function useResizable(iw, ih, minW = 320, minH = 400, maxW = 700, maxH = 900) {
+function useResizable(iw, ih, minW = 320, minH = 400) {
   const [size, setSize] = useState({ w: iw, h: ih });
   const resizing = useRef(false);
   const startMouse = useRef({ x: 0, y: 0 });
@@ -69,15 +69,15 @@ function useResizable(iw, ih, minW = 320, minH = 400, maxW = 700, maxH = 900) {
     const mv = (e) => {
       if (!resizing.current) return;
       setSize({
-        w: Math.min(maxW, Math.max(minW, startSize.current.w + (e.clientX - startMouse.current.x))),
-        h: Math.min(maxH, Math.max(minH, startSize.current.h + (e.clientY - startMouse.current.y))),
+        w: Math.max(minW, startSize.current.w + (e.clientX - startMouse.current.x)),
+        h: Math.max(minH, startSize.current.h + (e.clientY - startMouse.current.y)),
       });
     };
     const up = () => { resizing.current = false; };
     window.addEventListener("mousemove", mv);
     window.addEventListener("mouseup", up);
     return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
-  }, [minW, minH, maxW, maxH]);
+  }, [minW, minH]);
   return { size, onResizeStart };
 }
 
@@ -635,7 +635,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const collapsed = useDraggable(620, 55);
   const expanded = useDraggable(560, 30);
   const hidden = useDraggable(820, 55);
-  const { size: panelSize, onResizeStart } = useResizable(440, 600, 360, 400, 860, 900);
+  const { size: panelSize, onResizeStart } = useResizable(440, 600, 300, 200);
   const scaledFont = (base) => Math.round(base * textScale);
   const cycleTextSize = () => setTextScale(s => {
     const steps = [0.85, 1, 1.15, 1.3];
