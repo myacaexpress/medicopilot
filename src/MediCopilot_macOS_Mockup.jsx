@@ -12,12 +12,23 @@ const T = {
 
 // ─── Responsive hook ───
 function useIsMobile(breakpoint = 768) {
-  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" ? window.innerWidth < breakpoint : false);
+  const query = `(max-width: ${breakpoint - 1}px)`;
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    // matchMedia is the most reliable cross-browser way to detect viewport size,
+    // including in-app browsers and webviews where innerWidth can be unreliable.
+    if (window.matchMedia) return window.matchMedia(query).matches;
+    return window.innerWidth < breakpoint;
+  });
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < breakpoint);
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
-  }, [breakpoint]);
+    const mql = window.matchMedia(query);
+    // Re-check on mount to handle any timing edge cases where the initial
+    // render ran before the viewport meta tag was fully applied.
+    setIsMobile(mql.matches);
+    const handler = (e) => setIsMobile(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, [query]);
   return isMobile;
 }
 
