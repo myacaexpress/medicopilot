@@ -629,6 +629,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const [activeTab, setActiveTab] = useState("copilot");
   const [splitPanels, setSplitPanels] = useState(["transcript", "copilot"]);
   const [fullPanel, setFullPanel] = useState(null);
+  const [splitPct, setSplitPct] = useState(50);
+  const splitContainerRef = useRef(null);
+  const splitDragging = useRef(false);
   const collapsed = useDraggable(620, 55);
   const expanded = useDraggable(560, 30);
   const hidden = useDraggable(820, 55);
@@ -642,6 +645,24 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   useEffect(() => {
     const iv = setInterval(() => setTick(t => t + 1), 300);
     return () => clearInterval(iv);
+  }, []);
+
+  const onSplitDividerDown = useCallback((e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    splitDragging.current = true;
+  }, []);
+
+  useEffect(() => {
+    const mv = (e) => {
+      if (!splitDragging.current || !splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      setSplitPct(Math.min(80, Math.max(20, ((e.clientX - rect.left) / rect.width) * 100)));
+    };
+    const up = () => { splitDragging.current = false; };
+    window.addEventListener("mousemove", mv);
+    window.addEventListener("mouseup", up);
+    return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
   }, []);
 
   const peclItems = [
@@ -1000,12 +1021,35 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
               );
             })}
           </div>
-          <div data-no-drag="true" style={{ flex: 1, display: "flex", minHeight: 0, cursor: "default" }}>
-            {splitPanels.map((key, i) => (
-              <div key={key} style={{ flex: 1, overflowY: "auto", borderRight: i === 0 ? "1px solid rgba(0,123,127,0.2)" : "none" }}>
-                {renderPanelContent(key)}
+          <div ref={splitContainerRef} data-no-drag="true" style={{ flex: 1, display: "flex", minHeight: 0, cursor: "default", overflow: "hidden" }}>
+            {/* Left panel */}
+            <div style={{ width: `${splitPct}%`, overflowY: "auto", flexShrink: 0, minWidth: 0 }}>
+              {renderPanelContent(splitPanels[0])}
+            </div>
+            {/* Draggable vertical divider */}
+            <div
+              onMouseDown={onSplitDividerDown}
+              style={{
+                width: 9, flexShrink: 0, cursor: "col-resize", userSelect: "none",
+                background: "rgba(0,123,127,0.18)",
+                borderLeft: "1px solid rgba(0,123,127,0.35)",
+                borderRight: "1px solid rgba(0,123,127,0.35)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,123,127,0.45)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,123,127,0.18)"; }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: 3, pointerEvents: "none" }}>
+                {[0,1,2,3,4].map(i => (
+                  <div key={i} style={{ width: 3, height: 3, borderRadius: "50%", background: T.teal, opacity: 0.7 }} />
+                ))}
               </div>
-            ))}
+            </div>
+            {/* Right panel */}
+            <div style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
+              {renderPanelContent(splitPanels[1])}
+            </div>
           </div>
         </>}
 
