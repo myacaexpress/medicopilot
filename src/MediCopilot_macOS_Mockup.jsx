@@ -124,6 +124,7 @@ const aiResponses = [
   {
     trigger: "what plans would cover my Eliquis",
     context: { screen: "Five9: Maria Garcia, ZIP 33024, Original Medicare + PDP", audio: "Client asking about Eliquis coverage in Pembroke Pines" },
+    // legacy mobile fields
     response: "3 plans cover Eliquis in ZIP 33024:",
     plans: [
       { name: "Humana Preferred Rx Plan", copay: "$47/mo", tier: "T3", pa: "No", stars: "★★★★" },
@@ -131,22 +132,54 @@ const aiResponses = [
       { name: "WellCare Value Script", copay: "$89/mo", tier: "T4", pa: "Yes", stars: "★★★" },
     ],
     compliance: "Present all options. Do not describe any plan as \"the best\" — let Mrs. Garcia decide based on her needs.",
+    // desktop Cluely-style fields
+    sayThis: "Mrs. Garcia, I've pulled up Medicare prescription plans in the 33024 ZIP that cover Eliquis. The strongest option right now is the Humana Preferred Rx Plan — Eliquis is on Tier 3 at $47 a month, no prior authorization required, and it's rated 4 stars. I can walk you through two other options as well so you can compare.",
+    pressMore: [
+      "Aetna CVS Health Rx Saver also covers Eliquis at Tier 3 — $42 a month, no prior auth required. A bit lower monthly cost.",
+      "WellCare Value Script covers it at Tier 4 for $89 a month — prior authorization is required, so a bit more friction when filling.",
+    ],
+    followUps: [
+      "Which monthly copay range works best for your budget?",
+      "Are there other prescriptions you'd like me to check coverage on while I have you?",
+    ],
   },
   {
     trigger: "Dr. Patel at Baptist Health",
     context: { screen: "Five9: Maria Garcia, Humana S5884-065 under discussion", audio: "Client asking about provider network — Dr. Patel, Baptist Health" },
+    // legacy mobile fields
     response: "✅ Dr. Raj Patel, MD — Baptist Health South Florida",
     detail: "In-Network confirmed for Humana Preferred Rx Plan (S5884-065). Internal Medicine.",
     compliance: "Before enrollment: you still need to cover Medicare Savings Programs (PECL requirement).",
     script: "\"Mrs. Garcia, I'm required to mention Medicare Savings Programs — state programs that can help with your Part B premium. Would you like me to check if you might qualify?\"",
+    // desktop Cluely-style fields
+    sayThis: "Good news — Dr. Raj Patel at Baptist Health South Florida is in-network for the Humana Preferred Rx Plan we've been discussing. He's listed under Internal Medicine, so your primary care relationship stays intact. Before we go further, I do need to mention a couple of Medicare Savings Programs as part of my required disclosures.",
+    pressMore: [
+      "Medicare Savings Programs are state-run programs that can help cover your Part B premium — eligibility is based on income and assets.",
+      "This is a PECL compliance requirement, so I want to make sure we cover it properly before moving to enrollment.",
+    ],
+    followUps: [
+      "Would you like me to check if you might qualify for a Medicare Savings Program?",
+      "Any other providers or specialists you'd like me to verify before we finalize?",
+    ],
   },
   {
     trigger: "what about dental",
     context: { screen: "Five9: Maria Garcia, discussing MAPD plans", audio: "Client asking about dental coverage — current Medicare doesn't cover" },
+    // legacy mobile fields
     response: "Great question. Several MAPD plans in 33024 include dental benefits:",
     detail: "Humana Gold Plus (H1036-200) includes preventive and comprehensive dental. Aetna Medicare Eagle (H3312-067) includes preventive dental with $2,000 annual max.",
     trifecta: "This is the ancillary conversation — a natural bridge to the trifecta. If she needs dental + vision + hearing, an ancillary package alongside her MAPD strengthens retention.",
     compliance: "Only present dental benefits that are part of the MA plan or a separate ancillary product you're appointed to sell.",
+    // desktop Cluely-style fields
+    sayThis: "You're right that Original Medicare doesn't cover dental — but several Medicare Advantage plans in your ZIP do. The Humana Gold Plus plan includes both preventive and comprehensive dental care. The Aetna Medicare Eagle covers preventive dental with a $2,000 annual maximum. If you're thinking about major work like crowns or extractions, the Humana plan would give you more coverage.",
+    pressMore: [
+      "If dental is a real priority, we can also look at pairing a Medicare Advantage plan with a standalone ancillary dental policy — that can significantly raise your annual maximum.",
+      "Some plans bundle dental with vision and hearing coverage, which tends to be a strong value for clients in this age range.",
+    ],
+    followUps: [
+      "Have you had any major dental work planned recently — crowns, implants, or anything like that?",
+      "Would you like me to put a couple of MAPD plans with dental side by side so you can compare the benefits?",
+    ],
   },
 ];
 
@@ -636,6 +669,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const expanded = useDraggable(560, 30);
   const hidden = useDraggable(820, 55);
   const { size: panelSize, onResizeStart } = useResizable(440, 600, 300, 200);
+  const { size: collapsedSize, onResizeStart: onCollapsedResizeStart } = useResizable(390, 240, 300, 160);
   const scaledFont = (base) => Math.round(base * textScale);
   const cycleTextSize = () => setTextScale(s => {
     const steps = [0.85, 1, 1.15, 1.3];
@@ -753,26 +787,71 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     </div>
   );
 
-  const renderDesktopCopilot = () => (
-    <div style={{ padding: "6px 14px" }}>
-      <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
-        {[{ icon: Heart, label: "MAPD", on: true }, { icon: Coins, label: "Ancillary", on: shownResponses >= 3 }, { icon: Sprout, label: "Life", on: false }].map(({ icon: Ic, label, on }) => (
-          <div key={label} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, padding: "4px 0", borderRadius: 6, background: on ? "rgba(0,123,127,0.12)" : "transparent" }}>
-            <Ic size={11} color={on ? T.teal : "rgba(255,255,255,0.12)"} />
-            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: on ? 700 : 400, color: on ? T.teal : "rgba(255,255,255,0.15)" }}>{label}</span>
+  const renderDesktopCopilot = () => {
+    const resp = aiResponses[shownResponses - 1];
+    return (
+      <div style={{ padding: "6px 14px" }}>
+        {/* Detected trigger + source chips */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(0,123,127,0.1)", border: "1px solid rgba(0,123,127,0.2)", borderRadius: 20 }}>
+            <Bot size={9} color={T.teal} />
+            <span style={{ fontFamily: T.mono, fontSize: 9, color: T.teal }}>"{resp.trigger}"</span>
           </div>
-        ))}
-      </div>
-      {aiResponses.slice(0, shownResponses).map((resp, i) => (
-        <AIResponseCard key={i} resp={resp} scaledFont={scaledFont} opacity={opacity} audioOn={audioOn} screenOn={screenOn} />
-      ))}
-      {shownResponses < aiResponses.length && (
-        <div style={{ textAlign: "center", padding: "8px 0" }}>
-          <span style={{ fontFamily: T.display, fontSize: 10, color: "rgba(255,255,255,0.2)" }}>Click "Ask AI" for next response...</span>
+          <div style={{ flex: 1 }} />
+          {audioOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(52,199,123,0.5)", background: "rgba(52,199,123,0.06)", padding: "1px 5px", borderRadius: 3 }}>🎙 audio</span>}
+          {screenOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(0,123,127,0.5)", background: "rgba(0,123,127,0.06)", padding: "1px 5px", borderRadius: 3 }}>🖥 screen</span>}
         </div>
-      )}
-    </div>
-  );
+
+        {/* ── Say this: ── */}
+        <div style={{ marginBottom: 10, background: "rgba(0,123,127,0.09)", border: "1px solid rgba(0,123,127,0.28)", borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0", padding: "10px 12px" }}>
+          <div style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Say this:</div>
+          <div style={{ fontFamily: T.body, fontSize: scaledFont(13), lineHeight: 1.65, color: "rgba(255,255,255,0.92)" }}>{resp.sayThis}</div>
+        </div>
+
+        {/* ── If they press more: ── */}
+        {resp.pressMore && (
+          <div style={{ marginBottom: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 8, padding: "8px 12px" }}>
+            <div style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.38)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7 }}>If they press more, add this:</div>
+            {resp.pressMore.map((point, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, padding: "3px 0" }}>
+                <span style={{ fontFamily: T.mono, fontSize: 11, color: T.teal, flexShrink: 0, lineHeight: 1.45 }}>›</span>
+                <span style={{ fontFamily: T.body, fontSize: scaledFont(12), color: "rgba(255,255,255,0.6)", lineHeight: 1.5 }}>{point}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Follow-up questions: ── */}
+        {resp.followUps && (
+          <div style={{ marginBottom: 10, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 8, padding: "8px 12px" }}>
+            <div style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7 }}>Follow-up questions:</div>
+            {resp.followUps.map((q, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, padding: "3px 0" }}>
+                <span style={{ fontFamily: T.mono, fontSize: 10, color: T.coral, flexShrink: 0, lineHeight: 1.5 }}>?</span>
+                <span style={{ fontFamily: T.body, fontStyle: "italic", fontSize: scaledFont(12), color: "rgba(255,255,255,0.5)", lineHeight: 1.5 }}>{q}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Compliance note ── */}
+        {resp.compliance && (
+          <div style={{ display: "flex", gap: 6, padding: "6px 8px", background: "rgba(245,166,35,0.06)", border: "1px solid rgba(245,166,35,0.14)", borderRadius: 6, marginBottom: 8 }}>
+            <Shield size={10} color="#F5A623" style={{ flexShrink: 0, marginTop: 1 }} />
+            <span style={{ fontFamily: T.body, fontSize: scaledFont(10), color: "rgba(255,255,255,0.5)", lineHeight: 1.4 }}>{resp.compliance}</span>
+          </div>
+        )}
+
+        {/* Response counter */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>{shownResponses} / {aiResponses.length} responses</span>
+          {shownResponses < aiResponses.length && (
+            <span style={{ fontFamily: T.display, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>· click Ask AI for next</span>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const renderPanelContent = (key) => {
     if (key === "call") return renderDesktopCallInfo();
@@ -826,13 +905,16 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     return (
       <div onMouseDown={collapsed.onMouseDown} style={{
         position: "absolute", left: collapsed.pos.x, top: collapsed.pos.y,
-        width: 390, zIndex: 100, background: clearBg(opacity), border: clearBorder(0.4),
+        width: collapsedSize.w, height: collapsedSize.h,
+        display: "flex", flexDirection: "column",
+        zIndex: 100, background: clearBg(opacity), border: clearBorder(0.4),
         borderRadius: 14, overflow: "hidden", boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
         cursor: "grab", userSelect: "none",
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", flexShrink: 0 }}>
           <GripVertical size={14} color="rgba(255,255,255,0.25)" />
-          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 14 }}>
+          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: scaledFont(14) }}>
             <span style={{ color: T.white }}>Tri</span><span style={{ color: T.coral }}>B</span><span style={{ color: T.white }}>e</span>
           </span>
           <div style={{ flex: 1 }} />
@@ -845,8 +927,12 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(255,255,255,0.04)", borderRadius: 6 }}>
             <Shield size={11} color={T.teal} />
-            <span style={{ fontFamily: T.mono, fontSize: 10, color: T.teal }}>{peclDone}/5</span>
+            <span style={{ fontFamily: T.mono, fontSize: scaledFont(10), color: T.teal }}>{peclDone}/5</span>
           </div>
+          <button data-no-drag="true" onClick={cycleTextSize} title={`Text: ${Math.round(textScale * 100)}%`} style={{ display: "flex", alignItems: "center", gap: 1, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, cursor: "pointer", padding: "2px 5px" }}>
+            <span style={{ fontFamily: T.display, fontSize: 8, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>A</span>
+            <span style={{ fontFamily: T.display, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>A</span>
+          </button>
           <button data-no-drag="true" onClick={() => setMode("expanded")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
             <Maximize2 size={14} color="rgba(255,255,255,0.5)" />
           </button>
@@ -854,39 +940,53 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             <EyeOff size={14} color="rgba(255,255,255,0.5)" />
           </button>
         </div>
-        <div style={{ padding: "0 12px 6px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 6, borderLeft: "2px solid rgba(52,199,123,0.4)" }}>
+
+        {/* Scrollable content */}
+        <div data-no-drag="true" style={{ flex: 1, overflowY: "auto", padding: "0 12px 6px", cursor: "default" }}>
+          {/* Transcript snippet */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", marginBottom: 6, background: "rgba(255,255,255,0.03)", borderRadius: 6, borderLeft: "2px solid rgba(52,199,123,0.4)" }}>
             <Volume2 size={10} color="rgba(255,255,255,0.3)" />
-            <span style={{ fontFamily: T.body, fontStyle: "italic", fontSize: 11, color: "rgba(255,255,255,0.5)", flex: 1 }}>
-              "{transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text.slice(0, 60)}..."
+            <span style={{ fontFamily: T.body, fontStyle: "italic", fontSize: scaledFont(11), color: "rgba(255,255,255,0.5)", flex: 1 }}>
+              "{transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text.slice(0, 65)}..."
             </span>
           </div>
-        </div>
-        <div style={{ padding: "0 12px 8px" }}>
-          <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 10px", borderLeft: `2px solid ${T.teal}` }}>
-            <div style={{ fontFamily: T.body, fontSize: 12, color: `rgba(255,255,255,${Math.min(opacity+0.1,1)})`, lineHeight: 1.5 }}>{latestResp.response}</div>
-            {latestResp.plans && <div style={{ fontFamily: T.mono, fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>{latestResp.plans.map(p => p.name).join(" · ")}</div>}
-            {latestResp.detail && <div style={{ fontFamily: T.body, fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>{latestResp.detail}</div>}
+          {/* Say this: preview */}
+          <div style={{ background: "rgba(0,123,127,0.09)", border: "1px solid rgba(0,123,127,0.25)", borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0", padding: "8px 10px" }}>
+            <div style={{ fontFamily: T.display, fontSize: 8, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Say this:</div>
+            <div style={{ fontFamily: T.body, fontSize: scaledFont(12), color: `rgba(255,255,255,${Math.min(opacity + 0.1, 0.95)})`, lineHeight: 1.55 }}>{latestResp.sayThis}</div>
           </div>
         </div>
-        <div data-no-drag="true" style={{ padding: "0 12px 10px", display: "flex", gap: 6 }}>
-          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "2px 2px 2px 12px" }}>
-            <input placeholder="Ask or press ⌘Enter..." value={inputVal} onChange={e => setInputVal(e.target.value)}
-              style={{ flex: 1, background: "none", border: "none", outline: "none", fontFamily: T.body, fontSize: 13, color: T.white, padding: "8px 0" }} />
-            <button onClick={handleAskAI} style={{ background: T.teal, border: "none", borderRadius: 8, padding: "8px 10px", cursor: "pointer" }}><Send size={13} color={T.white} /></button>
+
+        {/* Input bar */}
+        <div data-no-drag="true" style={{ padding: "6px 12px 8px", display: "flex", gap: 6, flexShrink: 0, cursor: "default" }}>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "2px 2px 2px 10px" }}>
+            <input placeholder="What should I say?" value={inputVal} onChange={e => setInputVal(e.target.value)}
+              style={{ flex: 1, background: "none", border: "none", outline: "none", fontFamily: T.body, fontSize: scaledFont(12), color: T.white, padding: "7px 0" }} />
+            <button onClick={handleAskAI} style={{ background: T.teal, border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer" }}><Send size={12} color={T.white} /></button>
           </div>
-          <button onClick={handleAskAI} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "linear-gradient(135deg, #007B7F, #004D50)", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
-            <Zap size={14} color={T.white} />
-            <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, color: T.white }}>Ask AI</span>
+          <button onClick={handleAskAI} style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 12px", background: "linear-gradient(135deg, #007B7F, #004D50)", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
+            <Zap size={13} color={T.white} />
+            <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: scaledFont(11), color: T.white }}>Ask AI</span>
           </button>
         </div>
-        <div style={{ display: "flex", justifyContent: "center", gap: 12, padding: "6px 12px", borderTop: "1px solid rgba(255,255,255,0.03)" }}>
-          {[["⌘ Enter","Ask AI"],["⌘ ⇧ H","Hide"],["⌘ ⇧ E","Expand"],["⌘ ⇧ M","Mic"]].map(([k,l]) => (
-            <div key={k} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.03)", padding: "1px 5px", borderRadius: 3 }}>{k}</span>
-              <span style={{ fontFamily: T.display, fontSize: 9, color: "rgba(255,255,255,0.12)" }}>{l}</span>
+
+        {/* Hotkey hints */}
+        <div style={{ display: "flex", justifyContent: "center", gap: 10, padding: "4px 12px 6px", borderTop: "1px solid rgba(255,255,255,0.03)", flexShrink: 0 }}>
+          {[["⌘↩","Ask AI"],["⌘⇧H","Hide"],["⌘⇧E","Expand"],["⌘⇧M","Mic"]].map(([k,l]) => (
+            <div key={k} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+              <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)", padding: "1px 4px", borderRadius: 3 }}>{k}</span>
+              <span style={{ fontFamily: T.display, fontSize: 8, color: "rgba(255,255,255,0.1)" }}>{l}</span>
             </div>
           ))}
+        </div>
+
+        {/* Resize handle */}
+        <div data-no-drag="true" onMouseDown={onCollapsedResizeStart} style={{ position: "absolute", bottom: 0, right: 0, width: 22, height: 22, cursor: "nwse-resize", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+          <svg width="9" height="9" viewBox="0 0 10 10" style={{ opacity: 0.3 }}>
+            <line x1="9" y1="1" x2="1" y2="9" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="9" y1="5" x2="5" y2="9" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="9" y1="8" x2="8" y2="9" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
         </div>
       </div>
     );
