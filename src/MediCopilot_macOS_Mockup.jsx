@@ -625,31 +625,19 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const [shownResponses, setShownResponses] = useState(1);
   const [tick, setTick] = useState(0);
   const [textScale, setTextScale] = useState(1);
-  const [splitPct, setSplitPct] = useState(35);
-  const splitDrag = useRef(false);
-  const splitContainerRef = useRef(null);
+  const [viewMode, setViewMode] = useState("tabs"); // "tabs" | "split" | "full"
+  const [activeTab, setActiveTab] = useState("copilot");
+  const [splitPanels, setSplitPanels] = useState(["transcript", "copilot"]);
+  const [fullPanel, setFullPanel] = useState(null);
   const collapsed = useDraggable(620, 55);
   const expanded = useDraggable(560, 30);
   const hidden = useDraggable(820, 55);
-  const { size: panelSize, onResizeStart } = useResizable(410, 600);
+  const { size: panelSize, onResizeStart } = useResizable(440, 600, 360, 400, 860, 900);
   const scaledFont = (base) => Math.round(base * textScale);
   const cycleTextSize = () => setTextScale(s => {
     const steps = [0.85, 1, 1.15, 1.3];
     return steps[(steps.indexOf(s) + 1) % steps.length];
   });
-
-  const onDividerDown = useCallback((e) => { e.stopPropagation(); e.preventDefault(); splitDrag.current = true; }, []);
-  useEffect(() => {
-    const mv = (e) => {
-      if (!splitDrag.current || !splitContainerRef.current) return;
-      const rect = splitContainerRef.current.getBoundingClientRect();
-      setSplitPct(Math.min(75, Math.max(15, ((e.clientY - rect.top) / rect.height) * 100)));
-    };
-    const up = () => { splitDrag.current = false; };
-    window.addEventListener("mousemove", mv);
-    window.addEventListener("mouseup", up);
-    return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
-  }, []);
 
   useEffect(() => {
     const iv = setInterval(() => setTick(t => t + 1), 300);
@@ -671,6 +659,127 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
     if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
   };
+
+  const panelDefs = [
+    { key: "call", label: "Call Info", icon: Phone },
+    { key: "copilot", label: "AI Copilot", icon: Zap },
+    { key: "transcript", label: "Transcript", icon: Volume2 },
+  ];
+
+  const toggleSplitPanel = (key) => {
+    if (splitPanels.includes(key)) return;
+    setSplitPanels(prev => [prev[1], key]);
+  };
+
+  // ─── Desktop panel content renderers ───
+  const renderDesktopCallInfo = () => (
+    <div style={{ padding: "8px 14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <div style={{ width: 8, height: 8, borderRadius: 4, background: "#34C77B", boxShadow: "0 0 6px rgba(52,199,123,0.4)" }} />
+        <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: "#34C77B" }}>CONNECTED</span>
+        <span style={{ fontFamily: T.mono, fontSize: 11, color: T.dusk }}>08:12</span>
+      </div>
+      <div style={{ fontFamily: T.mono, fontSize: 9, color: "#666", marginBottom: 10 }}>Campaign: AEP_MAPD_FL</div>
+      <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: 10, marginBottom: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {[["Caller","Maria Garcia"],["Phone","(954) 555-0142"],["ZIP","33024 — Pembroke Pines, FL"],["DOB","03/15/1952 (Age 74)"],["Coverage","Original Medicare + PDP"],["Lead Source","AllCalls"]].map(([k,v]) => (
+            <div key={k}>
+              <div style={{ fontFamily: T.display, fontSize: 8, fontWeight: 600, color: "#666", textTransform: "uppercase", letterSpacing: "0.05em" }}>{k}</div>
+              <div style={{ fontFamily: T.body, fontSize: 11, color: "#ddd", marginTop: 1 }}>{v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 10 }}>
+        {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"],["End Call","📕"]].map(([l,ic]) => (
+          <button key={l} style={{ background: l==="End Call" ? "rgba(231,76,60,0.3)" : "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 4px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+            <span style={{ fontSize: 16 }}>{ic}</span>
+            <span style={{ fontFamily: T.display, fontSize: 9, color: "#999" }}>{l}</span>
+          </button>
+        ))}
+      </div>
+      <div style={{ padding: 10, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 8 }}>
+        <div style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>PECL Checklist</div>
+        {peclItems.map(item => (
+          <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0" }}>
+            {item.done ? <CheckCircle size={11} color={T.teal} /> : <Circle size={11} color="rgba(255,255,255,0.15)" />}
+            <span style={{ fontFamily: T.body, fontSize: 11, color: item.done ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.25)" }}>{item.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderDesktopTranscript = () => (
+    <div style={{ padding: "6px 14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+        <Volume2 size={10} color="rgba(255,255,255,0.2)" />
+        <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Live Transcript</span>
+        {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)", marginLeft: "auto" }}>Five9 — Maria Garcia, 33024</span>}
+      </div>
+      {transcriptLines.slice(0, visibleTranscript).map((line, i) => (
+        <div key={i} style={{ display: "flex", gap: 8, padding: "3px 0", alignItems: "flex-start" }}>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.15)", minWidth: 28 }}>{line.time}</span>
+          <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, minWidth: 40, color: line.speaker === "client" ? T.coral : "rgba(255,255,255,0.3)" }}>
+            {line.speaker === "client" ? "Client" : "Agent"}
+          </span>
+          <span style={{ fontFamily: T.body, fontSize: scaledFont(12), lineHeight: 1.45, color: line.isQuestion ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.45)", fontWeight: line.isQuestion ? 500 : 400 }}>
+            {line.text}
+            {line.isQuestion && <span style={{ marginLeft: 6, fontFamily: T.display, fontSize: 8, fontWeight: 700, color: T.teal, background: "rgba(0,123,127,0.15)", padding: "1px 5px", borderRadius: 3, verticalAlign: "middle" }}>? DETECTED</span>}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderDesktopCopilot = () => (
+    <div style={{ padding: "6px 14px" }}>
+      <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+        {[{ icon: Heart, label: "MAPD", on: true }, { icon: Coins, label: "Ancillary", on: shownResponses >= 3 }, { icon: Sprout, label: "Life", on: false }].map(({ icon: Ic, label, on }) => (
+          <div key={label} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, padding: "4px 0", borderRadius: 6, background: on ? "rgba(0,123,127,0.12)" : "transparent" }}>
+            <Ic size={11} color={on ? T.teal : "rgba(255,255,255,0.12)"} />
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: on ? 700 : 400, color: on ? T.teal : "rgba(255,255,255,0.15)" }}>{label}</span>
+          </div>
+        ))}
+      </div>
+      {aiResponses.slice(0, shownResponses).map((resp, i) => (
+        <AIResponseCard key={i} resp={resp} scaledFont={scaledFont} opacity={opacity} audioOn={audioOn} screenOn={screenOn} />
+      ))}
+      {shownResponses < aiResponses.length && (
+        <div style={{ textAlign: "center", padding: "8px 0" }}>
+          <span style={{ fontFamily: T.display, fontSize: 10, color: "rgba(255,255,255,0.2)" }}>Click "Ask AI" for next response...</span>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderPanelContent = (key) => {
+    if (key === "call") return renderDesktopCallInfo();
+    if (key === "copilot") return renderDesktopCopilot();
+    if (key === "transcript") return renderDesktopTranscript();
+    return null;
+  };
+
+  // ─── Shared desktop input bar ───
+  const DesktopInputBar = ({ style = {} }) => (
+    <div data-no-drag="true" style={{ padding: "10px 14px", borderTop: "1px solid rgba(255,255,255,0.06)", cursor: "default", flexShrink: 0, ...style }}>
+      <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "2px 2px 2px 12px" }}>
+          <input placeholder="Type or press ⌘Enter for AI response..." value={inputVal} onChange={e => setInputVal(e.target.value)}
+            style={{ flex: 1, background: "none", border: "none", outline: "none", fontFamily: T.body, fontSize: scaledFont(13), color: T.white, padding: "10px 0" }} />
+          <button style={{ background: "none", border: "none", cursor: "pointer", padding: "8px 4px" }}><Mic size={15} color="rgba(255,255,255,0.2)" /></button>
+          <button onClick={handleAskAI} style={{ background: T.teal, border: "none", borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}><Send size={14} color={T.white} /></button>
+        </div>
+        <button onClick={handleAskAI} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 16px", background: "linear-gradient(135deg, #007B7F, #004D50)", border: "none", borderRadius: 12, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Zap size={14} color={T.white} />
+            <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: T.white }}>Ask AI</span>
+          </div>
+          <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.45)", letterSpacing: "0.02em" }}>⌘ Enter</span>
+        </button>
+      </div>
+    </div>
+  );
 
   // ─── HIDDEN ───
   if (mode === "hidden") {
@@ -764,132 +873,178 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
   // ─── EXPANDED ───
   return (
-    <div onMouseDown={expanded.onMouseDown} style={{
-      position: "absolute", left: expanded.pos.x, top: expanded.pos.y,
-      width: panelSize.w, height: panelSize.h, zIndex: 100, background: clearBg(opacity), border: clearBorder(0.35),
-      borderRadius: 14, overflow: "hidden", boxShadow: "0 12px 48px rgba(0,0,0,0.4)",
-      display: "flex", flexDirection: "column", cursor: "grab", userSelect: "none",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <GripVertical size={14} color="rgba(255,255,255,0.25)" />
-        <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16 }}>
-          <span style={{ color: T.white }}>Tri</span><span style={{ color: T.coral }}>B</span><span style={{ color: T.white }}>e</span>
-        </span>
-        <span style={{ fontFamily: T.display, fontWeight: 400, fontSize: 11, color: "rgba(255,255,255,0.3)" }}>MediCopilot</span>
-        <div style={{ flex: 1 }} />
-        <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(52,199,123,0.1)", borderRadius: 6 }}>
-          <Phone size={10} color="#34C77B" />
-          <span style={{ fontFamily: T.mono, fontSize: 10, color: "#34C77B" }}>8:12</span>
-        </div>
-        <button data-no-drag="true" onClick={cycleTextSize} title={`Text: ${Math.round(textScale * 100)}%`} style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, cursor: "pointer", padding: "2px 6px", marginRight: 2 }}>
-          <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>A</span>
-          <span style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>A</span>
-        </button>
-        <button data-no-drag="true" onClick={() => setMode("collapsed")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}><Minimize2 size={14} color="rgba(255,255,255,0.5)" /></button>
-        <button data-no-drag="true" onClick={() => setMode("hidden")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}><EyeOff size={14} color="rgba(255,255,255,0.5)" /></button>
-      </div>
-
-      <div data-no-drag="true" style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-        <button onClick={() => setAudioOn(!audioOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
-          {audioOn ? <Volume2 size={11} color="#34C77B" /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
-          <AudioWave active={audioOn} color="#34C77B" bars={4} />
-          <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: audioOn ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn ? "Listening" : "Muted"}</span>
-        </button>
-        <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? "rgba(0,123,127,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
-          <Monitor size={11} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
-          <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: screenOn ? T.teal : "rgba(255,255,255,0.3)" }}>{screenOn ? "Screen On" : "Screen Off"}</span>
-        </button>
-        <div style={{ flex: 1 }} />
-        <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(245,166,35,0.08)", borderRadius: 6 }}>
-          <AlertTriangle size={10} color="#F5A623" />
-          <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: "#F5A623" }}>MSP</span>
-        </div>
-        <span style={{ fontFamily: T.display, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>PECL</span>
-        <div style={{ width: 40, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2 }}>
-          <div style={{ width: `${(peclDone/5)*100}%`, height: 3, background: T.teal, borderRadius: 2 }} />
-        </div>
-        <span style={{ fontFamily: T.mono, fontSize: 9, color: T.teal }}>{peclDone}/5</span>
-      </div>
-
-      <div ref={splitContainerRef} data-no-drag="true" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", cursor: "default", minHeight: 0 }}>
-        <div style={{ height: `${splitPct}%`, overflowY: "auto", borderBottom: "none" }}>
-          <div style={{ padding: "6px 14px 2px", display: "flex", alignItems: "center", gap: 6 }}>
-            <Volume2 size={10} color="rgba(255,255,255,0.2)" />
-            <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Live Transcript</span>
-            {screenOn && <>
-              <span style={{ fontFamily: T.display, fontSize: 9, color: "rgba(255,255,255,0.15)", marginLeft: "auto" }}>Screen:</span>
-              <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)" }}>Five9 — Maria Garcia, 33024</span>
-            </>}
+    <>
+      {/* Fullscreen overlay (Full mode panel expansion) */}
+      {fullPanel && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "#0a1628", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <button onClick={() => setFullPanel(null)} style={{
+            position: "fixed", top: 16, right: 16, zIndex: 201,
+            background: "rgba(0,40,42,0.9)", border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: "50%", width: 38, height: 38,
+            display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+          }}>
+            <X size={18} color={T.white} />
+          </button>
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {renderPanelContent(fullPanel)}
           </div>
-          <div style={{ padding: "4px 14px 8px" }}>
-            {transcriptLines.slice(0, visibleTranscript).map((line, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, padding: "3px 0", alignItems: "flex-start" }}>
-                <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.15)", minWidth: 28 }}>{line.time}</span>
-                <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, minWidth: 40, color: line.speaker === "client" ? T.coral : "rgba(255,255,255,0.3)" }}>
-                  {line.speaker === "client" ? "Client" : "Agent"}
-                </span>
-                <span style={{ fontFamily: T.body, fontSize: scaledFont(12), lineHeight: 1.45, color: line.isQuestion ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.45)", fontWeight: line.isQuestion ? 500 : 400 }}>
-                  {line.text}
-                  {line.isQuestion && <span style={{ marginLeft: 6, fontFamily: T.display, fontSize: 8, fontWeight: 700, color: T.teal, background: "rgba(0,123,127,0.15)", padding: "1px 5px", borderRadius: 3, verticalAlign: "middle" }}>? DETECTED</span>}
-                </span>
+          <DesktopInputBar />
+        </div>
+      )}
+
+      {/* Floating expanded card */}
+      <div onMouseDown={expanded.onMouseDown} style={{
+        position: "absolute", left: expanded.pos.x, top: expanded.pos.y,
+        width: panelSize.w, height: panelSize.h, zIndex: 100, background: clearBg(opacity), border: clearBorder(0.35),
+        borderRadius: 14, overflow: "hidden", boxShadow: "0 12px 48px rgba(0,0,0,0.4)",
+        display: "flex", flexDirection: "column", cursor: "grab", userSelect: "none",
+      }}>
+        {/* ─── Title bar ─── */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
+          <GripVertical size={14} color="rgba(255,255,255,0.25)" />
+          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16 }}>
+            <span style={{ color: T.white }}>Tri</span><span style={{ color: T.coral }}>B</span><span style={{ color: T.white }}>e</span>
+          </span>
+          <span style={{ fontFamily: T.display, fontWeight: 400, fontSize: 11, color: "rgba(255,255,255,0.3)" }}>MediCopilot</span>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(52,199,123,0.1)", borderRadius: 6 }}>
+            <Phone size={10} color="#34C77B" />
+            <span style={{ fontFamily: T.mono, fontSize: 10, color: "#34C77B" }}>8:12</span>
+          </div>
+          <button data-no-drag="true" onClick={cycleTextSize} title={`Text: ${Math.round(textScale * 100)}%`} style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, cursor: "pointer", padding: "2px 6px", marginRight: 2 }}>
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>A</span>
+            <span style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>A</span>
+          </button>
+          <button data-no-drag="true" onClick={() => setMode("collapsed")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}><Minimize2 size={14} color="rgba(255,255,255,0.5)" /></button>
+          <button data-no-drag="true" onClick={() => setMode("hidden")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}><EyeOff size={14} color="rgba(255,255,255,0.5)" /></button>
+        </div>
+
+        {/* ─── View Mode Toggle Bar ─── */}
+        <div data-no-drag="true" style={{ display: "flex", gap: 4, padding: "6px 14px", background: "rgba(0,0,0,0.12)", borderBottom: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }}>
+          {[
+            { key: "tabs", label: "Tabs", icon: Menu },
+            { key: "split", label: "Split", icon: GripVertical },
+            { key: "full", label: "Full", icon: Maximize2 },
+          ].map(({ key, label, icon: Ic }) => (
+            <button key={key} onClick={() => setViewMode(key)} style={{
+              flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+              padding: "5px 0", border: "none", borderRadius: 6, cursor: "pointer",
+              background: viewMode === key ? "rgba(0,123,127,0.2)" : "rgba(255,255,255,0.03)",
+              outline: viewMode === key ? "1px solid rgba(0,123,127,0.4)" : "1px solid rgba(255,255,255,0.04)",
+            }}>
+              <Ic size={11} color={viewMode === key ? T.teal : "rgba(255,255,255,0.3)"} />
+              <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: viewMode === key ? 700 : 400, color: viewMode === key ? T.teal : "rgba(255,255,255,0.3)" }}>{label}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* ─── Context bar ─── */}
+        <div data-no-drag="true" style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderBottom: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }}>
+          <button onClick={() => setAudioOn(!audioOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
+            {audioOn ? <Volume2 size={11} color="#34C77B" /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
+            <AudioWave active={audioOn} color="#34C77B" bars={4} />
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: audioOn ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn ? "Listening" : "Muted"}</span>
+          </button>
+          <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? "rgba(0,123,127,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
+            <Monitor size={11} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: screenOn ? T.teal : "rgba(255,255,255,0.3)" }}>{screenOn ? "Screen On" : "Screen Off"}</span>
+          </button>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(245,166,35,0.08)", borderRadius: 6 }}>
+            <AlertTriangle size={10} color="#F5A623" />
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: "#F5A623" }}>MSP</span>
+          </div>
+          <span style={{ fontFamily: T.display, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>PECL</span>
+          <div style={{ width: 40, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2 }}>
+            <div style={{ width: `${(peclDone/5)*100}%`, height: 3, background: T.teal, borderRadius: 2 }} />
+          </div>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: T.teal }}>{peclDone}/5</span>
+        </div>
+
+        {/* ─── TABS mode ─── */}
+        {viewMode === "tabs" && <>
+          <div data-no-drag="true" style={{ display: "flex", gap: 0, flexShrink: 0, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+            {panelDefs.map(({ key, label, icon: Ic }) => (
+              <button key={key} onClick={() => setActiveTab(key)} style={{
+                flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                padding: "8px 0", border: "none", cursor: "pointer",
+                background: activeTab === key ? "rgba(0,123,127,0.12)" : "transparent",
+                borderBottom: activeTab === key ? `2px solid ${T.teal}` : "2px solid transparent",
+              }}>
+                <Ic size={11} color={activeTab === key ? T.teal : "rgba(255,255,255,0.3)"} />
+                <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: activeTab === key ? 700 : 400, color: activeTab === key ? T.teal : "rgba(255,255,255,0.3)" }}>{label}</span>
+              </button>
+            ))}
+          </div>
+          <div data-no-drag="true" style={{ flex: 1, overflowY: "auto", minHeight: 0, cursor: "default" }}>
+            {renderPanelContent(activeTab)}
+          </div>
+        </>}
+
+        {/* ─── SPLIT mode ─── */}
+        {viewMode === "split" && <>
+          <div data-no-drag="true" style={{ display: "flex", gap: 4, padding: "5px 14px", background: "rgba(0,0,0,0.08)", borderBottom: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }}>
+            {panelDefs.map(({ key, label, icon: Ic }) => {
+              const selected = splitPanels.includes(key);
+              return (
+                <button key={key} onClick={() => toggleSplitPanel(key)} style={{
+                  flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
+                  padding: "4px 0", border: "none", borderRadius: 5, cursor: "pointer",
+                  background: selected ? "rgba(0,123,127,0.18)" : "rgba(255,255,255,0.03)",
+                  outline: selected ? "1px solid rgba(0,123,127,0.35)" : "1px solid rgba(255,255,255,0.04)",
+                }}>
+                  <Ic size={10} color={selected ? T.teal : "rgba(255,255,255,0.3)"} />
+                  <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: selected ? 700 : 400, color: selected ? T.teal : "rgba(255,255,255,0.3)" }}>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div data-no-drag="true" style={{ flex: 1, display: "flex", minHeight: 0, cursor: "default" }}>
+            {splitPanels.map((key, i) => (
+              <div key={key} style={{ flex: 1, overflowY: "auto", borderRight: i === 0 ? "1px solid rgba(0,123,127,0.2)" : "none" }}>
+                {renderPanelContent(key)}
               </div>
             ))}
           </div>
-        </div>
+        </>}
 
-        <div onMouseDown={onDividerDown} style={{ height: 8, cursor: "row-resize", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.02)", borderTop: "1px solid rgba(255,255,255,0.06)", borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0, userSelect: "none" }}>
-          <div style={{ width: 32, height: 2, borderRadius: 1, background: "rgba(255,255,255,0.12)" }} />
-        </div>
-
-        <div style={{ display: "flex", gap: 4, padding: "6px 14px", borderBottom: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }}>
-          {[{ icon: Heart, label: "MAPD", on: true }, { icon: Coins, label: "Ancillary", on: shownResponses >= 3 }, { icon: Sprout, label: "Life", on: false }].map(({ icon: Ic, label, on }) => (
-            <div key={label} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, padding: "4px 0", borderRadius: 6, background: on ? "rgba(0,123,127,0.12)" : "transparent" }}>
-              <Ic size={11} color={on ? T.teal : "rgba(255,255,255,0.12)"} />
-              <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: on ? 700 : 400, color: on ? T.teal : "rgba(255,255,255,0.15)" }}>{label}</span>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "8px 14px", minHeight: 0 }}>
-          {aiResponses.slice(0, shownResponses).map((resp, i) => (
-            <AIResponseCard key={i} resp={resp} scaledFont={scaledFont} opacity={opacity} audioOn={audioOn} screenOn={screenOn} />
-          ))}
-        </div>
-      </div>
-
-      <div data-no-drag="true" style={{ padding: "10px 14px", borderTop: "1px solid rgba(255,255,255,0.06)", cursor: "default" }}>
-        <div style={{ display: "flex", gap: 6 }}>
-          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "2px 2px 2px 12px" }}>
-            <input placeholder="Type or press ⌘Enter for AI response..." value={inputVal} onChange={e => setInputVal(e.target.value)}
-              style={{ flex: 1, background: "none", border: "none", outline: "none", fontFamily: T.body, fontSize: scaledFont(13), color: T.white, padding: "10px 0" }} />
-            <button style={{ background: "none", border: "none", cursor: "pointer", padding: "8px 4px" }}><Mic size={15} color="rgba(255,255,255,0.2)" /></button>
-            <button onClick={handleAskAI} style={{ background: T.teal, border: "none", borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}><Send size={14} color={T.white} /></button>
+        {/* ─── FULL mode ─── */}
+        {viewMode === "full" && (
+          <div data-no-drag="true" style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "16px 14px", gap: 10, cursor: "default" }}>
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Click a panel to expand fullscreen</span>
+            {panelDefs.map(({ key, label, icon: Ic }) => (
+              <button key={key} onClick={() => setFullPanel(key)} style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 12,
+                padding: "12px 14px", border: "1px solid rgba(0,123,127,0.18)",
+                borderRadius: 10, cursor: "pointer", background: "rgba(0,40,42,0.5)", textAlign: "left",
+              }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(0,123,127,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Ic size={18} color={T.teal} />
+                </div>
+                <div>
+                  <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 13, color: T.white }}>{label}</div>
+                  <div style={{ fontFamily: T.body, fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>Click to expand fullscreen</div>
+                </div>
+                <div style={{ marginLeft: "auto" }}><Maximize2 size={14} color="rgba(255,255,255,0.2)" /></div>
+              </button>
+            ))}
           </div>
-          <button onClick={handleAskAI} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 16px", background: "linear-gradient(135deg, #007B7F, #004D50)", border: "none", borderRadius: 12, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <Zap size={14} color={T.white} />
-              <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: T.white }}>Ask AI</span>
-            </div>
-            <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.45)", letterSpacing: "0.02em" }}>⌘ Enter</span>
-          </button>
-        </div>
-        <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 6 }}>
-          {[["⌘↩","Ask AI"],["⌘⇧H","Hide"],["⌘⇧C","Collapse"],["⌘⇧M","Mic On/Off"]].map(([k,l]) => (
-            <span key={k} style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.12)" }}>
-              <span style={{ background: "rgba(255,255,255,0.02)", padding: "1px 4px", borderRadius: 3, marginRight: 3 }}>{k}</span>{l}
-            </span>
-          ))}
-        </div>
-      </div>
+        )}
 
-      <div data-no-drag="true" onMouseDown={onResizeStart} style={{ position: "absolute", bottom: 0, right: 0, width: 24, height: 24, cursor: "nwse-resize", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
-        <svg width="10" height="10" viewBox="0 0 10 10" style={{ opacity: 0.3 }}>
-          <line x1="9" y1="1" x2="1" y2="9" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" />
-          <line x1="9" y1="5" x2="5" y2="9" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" />
-          <line x1="9" y1="8" x2="8" y2="9" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
+        {/* ─── Input bar ─── */}
+        <DesktopInputBar />
+
+        {/* ─── Resize handle ─── */}
+        <div data-no-drag="true" onMouseDown={onResizeStart} style={{ position: "absolute", bottom: 0, right: 0, width: 24, height: 24, cursor: "nwse-resize", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+          <svg width="10" height="10" viewBox="0 0 10 10" style={{ opacity: 0.3 }}>
+            <line x1="9" y1="1" x2="1" y2="9" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="9" y1="5" x2="5" y2="9" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="9" y1="8" x2="8" y2="9" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
