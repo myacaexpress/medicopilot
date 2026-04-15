@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>MediCopilot — UI iteration mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --teal: #007B7F;
+    --teal-dark: #004D50;
+    --teal-light: #1A9EA2;
+    --coral: #F47C6E;
+    --green: #34C77B;
+    --amber: #F5A623;
+    --red: #E74C3C;
+    --dusk: #B0C4DE;
+    --display: 'Montserrat', sans-serif;
+    --body: 'Lora', Georgia, serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #0a1628; color: #fff; font-family: var(--body); }
+  body {
+    background:
+      radial-gradient(1200px 600px at 20% -10%, rgba(0,123,127,0.25), transparent),
+      radial-gradient(900px 500px at 110% 120%, rgba(244,124,110,0.18), transparent),
+      #0a1628;
+    min-height: 100vh;
+    padding: 40px 32px 80px;
+  }
+  h1 { font-family: var(--display); font-weight: 700; font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h1 + .sub { font-family: var(--body); color: rgba(255,255,255,0.55); margin-bottom: 32px; font-size: 15px; font-style: italic; }
+  h2 { font-family: var(--display); font-weight: 600; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.5); margin: 40px 0 14px; }
+  .grid { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); }
+  .label { font-family: var(--display); font-weight: 600; font-size: 9px; letter-spacing: 0.05em; text-transform: uppercase; color: rgba(255,255,255,0.45); }
+  .mono { font-family: var(--mono); }
+
+  /* ── Panel shell ── */
+  .panel {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 16px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    position: relative;
+  }
+  .panel-head {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+  }
+  .panel-title {
+    font-family: var(--display); font-weight: 600; font-size: 11px;
+    letter-spacing: 0.05em; text-transform: uppercase; color: rgba(255,255,255,0.7);
+  }
+  .panel-title .muted { color: rgba(255,255,255,0.3); font-weight: 500; margin-left: 6px; }
+  .spacer { flex: 1; }
+  .btn {
+    font-family: var(--display); font-weight: 600; font-size: 11px;
+    letter-spacing: 0.03em; text-transform: uppercase;
+    padding: 7px 12px; border-radius: 8px; border: 1px solid transparent;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn.primary { background: linear-gradient(135deg, var(--teal), var(--teal-dark)); color: #fff; border-color: rgba(255,255,255,0.1); box-shadow: 0 4px 14px rgba(0,123,127,0.35); }
+  .btn.ghost { background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.65); border-color: rgba(255,255,255,0.1); }
+  .btn.danger { background: rgba(231,76,60,0.1); color: #ff8a7b; border-color: rgba(231,76,60,0.25); }
+  .icon { width: 14px; height: 14px; display: inline-block; flex: none; }
+
+  /* ── Lead Context field grid ── */
+  .lead-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px 14px; }
+  .lead-grid .wide { grid-column: span 2; }
+  .field {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 10px;
+    padding: 8px 10px;
+  }
+  .field .label { margin-bottom: 3px; }
+  .field .value-row { display: flex; align-items: center; gap: 6px; min-height: 20px; }
+  .field .value { font-family: var(--body); font-size: 13px; color: rgba(255,255,255,0.92); flex: 1; }
+  .field .value.placeholder { color: rgba(255,255,255,0.3); font-style: italic; }
+  .pencil {
+    width: 14px; height: 14px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.25); cursor: pointer;
+  }
+  .pencil:hover { color: var(--teal-light); background: rgba(26,158,162,0.08); }
+
+  /* ── Confidence pills ── */
+  .pill {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 10px; line-height: 1.4;
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .pill.verified { background: rgba(52,199,123,0.15); color: var(--green); border-color: rgba(52,199,123,0.3); }
+  .pill.high     { background: rgba(0,123,127,0.18); color: var(--teal-light); border-color: rgba(0,123,127,0.35); }
+  .pill.medium   { background: rgba(245,166,35,0.08); color: var(--amber); border-color: rgba(245,166,35,0.35); }
+  .pill.low      { background: rgba(231,76,60,0.08); color: #ff8a7b; border-color: rgba(231,76,60,0.4); animation: lowPulse 1.4s infinite ease-in-out; }
+  @keyframes lowPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(231,76,60,0.4); } 50% { box-shadow: 0 0 0 4px rgba(231,76,60,0); } }
+
+  /* ── Chips ── */
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+  .chip { font-family: var(--display); font-size: 10px; padding: 2px 8px; border-radius: 999px; background: rgba(0,123,127,0.12); color: #cfeeef; border: 1px solid rgba(0,123,127,0.25); }
+  .chip.add { background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.4); border-style: dashed; cursor: pointer; }
+
+  /* ── Status strip (ambiguous) ── */
+  .strip {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; margin-bottom: 10px; border-radius: 10px;
+    background: rgba(245,166,35,0.08); border: 1px solid rgba(245,166,35,0.25);
+    font-family: var(--display); font-size: 11px; color: #ffd699;
+  }
+  .strip.cold { background: rgba(244,124,110,0.08); border-color: rgba(244,124,110,0.3); color: #ffb4a8; }
+  .strip.success { background: rgba(52,199,123,0.08); border-color: rgba(52,199,123,0.25); color: #b6f2cf; }
+
+  /* ── Ready label ── */
+  .ready { display: inline-flex; align-items: center; gap: 5px; font-family: var(--display); font-weight: 600; font-size: 10px; color: var(--green); letter-spacing: 0.06em; text-transform: uppercase; }
+  .ready::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px rgba(52,199,123,0.7); }
+
+  /* ── Recording pill ── */
+  .rec-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(231,76,60,0.1); border: 1px solid rgba(231,76,60,0.3); font-family: var(--display); font-weight: 600; font-size: 10px; letter-spacing: 0.04em; color: #ff8a7b; }
+  .rec-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+  /* ── Consent banner ── */
+  .consent {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px; border-radius: 10px;
+    background: rgba(0,123,127,0.08); border: 1px solid rgba(0,123,127,0.25);
+    font-family: var(--body); font-size: 12px; color: rgba(255,255,255,0.75);
+  }
+  .consent .x { color: rgba(255,255,255,0.3); cursor: pointer; padding: 0 4px; }
+
+  /* ── PECL header polish ── */
+  .pecl-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .pecl-head h3 { font-family: var(--display); font-weight: 600; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: rgba(255,255,255,0.7); margin: 0; }
+  .pecl-head .p { font-family: var(--display); font-weight: 500; font-size: 10px; color: rgba(255,255,255,0.35); letter-spacing: 0.04em; }
+  .info-i {
+    width: 14px; height: 14px; border-radius: 50%; background: rgba(255,255,255,0.08);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 9px; color: rgba(255,255,255,0.55); cursor: help;
+  }
+  .tooltip { position: relative; }
+  .tooltip .tt {
+    position: absolute; top: 100%; left: 0; margin-top: 6px; width: 240px;
+    background: rgba(12,22,40,0.95); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; padding: 8px 10px; font-family: var(--body); font-size: 11px; line-height: 1.5;
+    color: rgba(255,255,255,0.8); box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+    opacity: 0; transform: translateY(-2px); transition: opacity 140ms, transform 140ms;
+    pointer-events: none; z-index: 10;
+  }
+  .tooltip:hover .tt { opacity: 1; transform: translateY(0); }
+
+  /* ── MSP badge ── */
+  .msp {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 8px; border-radius: 999px;
+    background: rgba(245,166,35,0.1); border: 1px solid rgba(245,166,35,0.35); color: var(--amber);
+    font-family: var(--display); font-weight: 600; font-size: 10px; letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: background 140ms, color 140ms, border-color 140ms, padding 140ms;
+  }
+  .msp:hover, .msp.hover { padding: 2px 12px; }
+  .msp.covered { background: rgba(0,123,127,0.15); border-color: rgba(0,123,127,0.4); color: #7fd9dd; }
+
+  /* ── Audio wave ── */
+  .wave-stack { display: flex; flex-direction: column; gap: 4px; padding: 10px; background: rgba(255,255,255,0.02); border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); }
+  .wave { display: flex; align-items: end; gap: 2px; height: 28px; }
+  .wave.client { height: 18px; }
+  .wave .bar { width: 3px; border-radius: 2px; }
+  .wave.you .bar { background: var(--teal-light); }
+  .wave.client .bar { background: var(--coral); opacity: 0.5; }
+  .wave-row { display: flex; align-items: center; gap: 8px; }
+  .wave-label { font-family: var(--mono); font-size: 9px; color: rgba(255,255,255,0.3); min-width: 42px; }
+
+  /* ── Capture overlay mockup frame ── */
+  .capture-stage {
+    position: relative;
+    background: #0f1c30;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    overflow: hidden;
+    aspect-ratio: 16/10;
+  }
+  .captured-frame {
+    position: absolute; inset: 0;
+    background:
+      linear-gradient(180deg, #1a2a48, #0f1c30),
+      #0f1c30;
+    filter: brightness(0.55);
+  }
+  .captured-frame::after {
+    content: "";
+    position: absolute; inset: 16px;
+    background:
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 28px),
+      linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0));
+    border-radius: 8px;
+  }
+  .fake-form {
+    position: absolute; left: 28px; top: 30px; right: 28px;
+    font-family: var(--display); color: rgba(255,255,255,0.6);
+  }
+  .fake-form .row { display: flex; gap: 12px; margin-bottom: 10px; font-size: 11px; }
+  .fake-form .k { width: 70px; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.05em; font-size: 9px; padding-top: 2px; }
+  .fake-form .v { flex: 1; background: rgba(255,255,255,0.05); border-radius: 4px; padding: 3px 6px; }
+  .selector {
+    position: absolute;
+    border: 2px dashed var(--teal-light);
+    background: rgba(26,158,162,0.08);
+    box-shadow: 0 0 0 4000px rgba(0,0,0,0.45);
+    border-radius: 2px;
+  }
+  .selector .handle {
+    position: absolute; width: 10px; height: 10px; background: var(--teal-light);
+    border: 2px solid #fff; border-radius: 2px;
+  }
+  .selector .handle.tl { left: -6px; top: -6px; cursor: nwse-resize; }
+  .selector .handle.tr { right: -6px; top: -6px; cursor: nesw-resize; }
+  .selector .handle.bl { left: -6px; bottom: -6px; cursor: nesw-resize; }
+  .selector .handle.br { right: -6px; bottom: -6px; cursor: nwse-resize; }
+  .selector .handle.t  { left: 50%; top: -6px; transform: translateX(-50%); cursor: ns-resize; }
+  .selector .handle.b  { left: 50%; bottom: -6px; transform: translateX(-50%); cursor: ns-resize; }
+  .selector .handle.l  { top: 50%; left: -6px; transform: translateY(-50%); cursor: ew-resize; }
+  .selector .handle.r  { top: 50%; right: -6px; transform: translateY(-50%); cursor: ew-resize; }
+  .selector .move-grip { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); color: rgba(255,255,255,0.5); font-family: var(--mono); font-size: 11px; pointer-events: none; }
+  .action-bar {
+    position: absolute; display: flex; gap: 6px;
+    background: rgba(10,22,40,0.96); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; padding: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    backdrop-filter: blur(14px);
+  }
+  .crosshair-note {
+    position: absolute; left: 16px; top: 16px;
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 10px; background: rgba(10,22,40,0.8); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; font-family: var(--mono); font-size: 10px; color: rgba(255,255,255,0.6);
+  }
+  .success-toast {
+    position: absolute; top: 16px; right: 16px;
+    background: rgba(52,199,123,0.12); border: 1px solid rgba(52,199,123,0.35);
+    color: #c8f5dd; font-family: var(--display); font-size: 11px; font-weight: 600;
+    padding: 8px 12px; border-radius: 10px; letter-spacing: 0.03em;
+  }
+
+  /* ── Annotation callouts ── */
+  .note {
+    display: block; font-family: var(--display); font-size: 10px;
+    color: rgba(255,255,255,0.45); margin-top: 6px; letter-spacing: 0.02em;
+  }
+  .note::before { content: "▸ "; color: var(--teal-light); }
+
+  /* skeleton shimmer */
+  .skel {
+    height: 14px; border-radius: 6px; width: 70%;
+    background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.12), rgba(255,255,255,0.05));
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite linear;
+  }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+</style>
+</head>
+<body>
+
+<h1>MediCopilot — UI iteration mockup</h1>
+<div class="sub">Design freeze v1 · paired with <span class="mono">plans/ui-final-spec.md</span></div>
+
+<!-- ============ LEAD CONTEXT PANEL ============ -->
+<h2>1 · Lead Context panel — three states</h2>
+<div class="grid">
+
+  <!-- Confident -->
+  <div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Lead context <span class="muted">· Five9 screen-pop</span></span>
+        <span class="ready">Ready</span>
+        <span class="spacer"></span>
+        <button class="btn ghost" title="Switch lead">Switch</button>
+        <button class="btn primary">⊕ Capture Lead</button>
+      </div>
+      <div class="lead-grid">
+        <div class="field">
+          <div class="label">Name</div>
+          <div class="value-row"><span class="value">Maria Garcia</span><span class="pill high">high</span><span class="pencil">✎</span></div>
+        </div>
+        <div class="field">
+          <div class="label">DOB</div>
+          <div class="value-row"><span class="value">Jun 4, 1958</span><span class="pill verified">verified</span><span class="pencil">✎</span></div>
+        </div>
+        <div class="field">
+          <div class="label">Phone</div>
+          <div class="value-row"><span class="value">(954) 555-0142</span><span class="pill high">high</span><span class="pencil">✎</span></div>
+        </div>
+        <div class="field wide">
+          <div class="label">Address</div>
+          <div class="value-row"><span class="value">2417 NW 84th Ave, Hollywood FL <strong>33024</strong></span><span class="pill verified">verified</span><span class="pencil">✎</span></div>
+        </div>
+        <div class="field">
+          <div class="label">Lead source</div>
+          <div class="value-row"><span class="value mono" style="font-size:11px">Five9 screen-pop</span></div>
+        </div>
+        <div class="field">
+          <div class="label">Current coverage</div>
+          <div class="value-row"><span class="value">Original Medicare</span><span class="pill high">high</span><span class="pencil">✎</span></div>
+        </div>
+        <div class="field">
+          <div class="label">Medications</div>
+          <div class="chips">
+            <span class="chip">Eliquis</span><span class="chip">Metformin</span><span class="chip add">+ add</span>
+          </div>
+        </div>
+        <div class="field">
+          <div class="label">Providers</div>
+          <div class="chips">
+            <span class="chip">Dr. Patel</span><span class="chip add">+ add</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <span class="note">Confident — at least one field verified, green "Ready" label. Collapsible via chevron on the right edge.</span>
+  </div>
+
+  <!-- Ambiguous -->
+  <div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Lead context <span class="muted">· Vision OCR</span></span>
+        <span class="spacer"></span>
+        <button class="btn ghost">Switch</button>
+        <button class="btn primary">⊕ Capture Lead</button>
+      </div>
+      <div class="strip">
+        <span>2 matches — pick the right lead</span>
+        <span class="spacer"></span>
+        <button class="btn ghost" style="font-size:10px;padding:4px 8px">Maria Garcia · 33024</button>
+        <button class="btn ghost" style="font-size:10px;padding:4px 8px">Mariana Garcia · 33028</button>
+      </div>
+      <div class="lead-grid">
+        <div class="field">
+          <div class="label">Name</div>
+          <div class="value-row"><span class="value">Maria Garcia</span><span class="pill medium">medium</span><span class="pencil">✎</span></div>
+        </div>
+        <div class="field">
+          <div class="label">DOB</div>
+          <div class="value-row"><span class="value placeholder">unclear — verify</span><span class="pill low">low</span><span class="pencil">✎</span></div>
+        </div>
+        <div class="field">
+          <div class="label">Phone</div>
+          <div class="value-row"><span class="value">(954) 555-0142</span><span class="pill medium">medium</span><span class="pencil">✎</span></div>
+        </div>
+        <div class="field wide">
+          <div class="label">Address</div>
+          <div class="value-row"><span class="value">… <strong>33024</strong> <em style="color:rgba(255,255,255,0.4)">(street blurred)</em></span><span class="pill medium">medium</span><span class="pencil">✎</span></div>
+        </div>
+        <div class="field">
+          <div class="label">Lead source</div>
+          <div class="value-row"><span class="value mono" style="font-size:11px">Vision OCR</span></div>
+        </div>
+      </div>
+    </div>
+    <span class="note">Ambiguous — candidate strip above, low-confidence field pulses red and AI response card fires: <em>"Confirm DOB with caller."</em></span>
+  </div>
+
+  <!-- Cold -->
+  <div>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-title">Lead context <span class="muted">· no data</span></span>
+        <span class="spacer"></span>
+        <button class="btn ghost">Enter manually</button>
+        <button class="btn primary">⊕ Capture Lead</button>
+      </div>
+      <div class="strip cold">
+        <span>⚠ No lead loaded — start by capturing from Five9, or enter manually.</span>
+      </div>
+      <div class="lead-grid">
+        <div class="field">
+          <div class="label">Name</div>
+          <div class="value-row"><span class="value placeholder">first, last</span><span class="pencil">✎</span></div>
+        </div>
+        <div class="field">
+          <div class="label">DOB</div>
+          <div class="value-row"><span class="value placeholder">MM / DD / YYYY</span><span class="pencil">✎</span></div>
+        </div>
+        <div class="field">
+          <div class="label">ZIP</div>
+          <div class="value-row"><span class="value placeholder">— primary field —</span><span class="pencil">✎</span></div>
+        </div>
+      </div>
+      <div class="consent" style="margin-top:14px">
+        <span>💬 <strong>AI nudge:</strong> "Start by getting spelling of first and last name."</span>
+      </div>
+    </div>
+    <span class="note">Cold — coral banner, ZIP promoted as primary field, AI nudge pre-populated in the response card.</span>
+  </div>
+
+  <!-- Loading skeleton -->
+  <div>
+    <div class="panel" style="box-shadow: 0 0 0 1px rgba(0,123,127,0.4);">
+      <div class="panel-head">
+        <span class="panel-title">Lead context <span class="muted">· extracting…</span></span>
+        <span class="spacer"></span>
+        <span class="mono" style="font-size:10px;color:var(--teal-light)">thinking</span>
+      </div>
+      <div class="lead-grid">
+        <div class="field">
+          <div class="label">Name</div><div class="skel"></div>
+        </div>
+        <div class="field">
+          <div class="label">DOB</div><div class="skel" style="width:50%"></div>
+        </div>
+        <div class="field">
+          <div class="label">Phone</div><div class="skel" style="width:60%"></div>
+        </div>
+        <div class="field wide">
+          <div class="label">Address</div><div class="skel" style="width:85%"></div>
+        </div>
+        <div class="field">
+          <div class="label">ZIP</div><div class="skel" style="width:35%"></div>
+        </div>
+      </div>
+    </div>
+    <span class="note">Loading skeleton — field-level shimmer + panel teal pulse. After 6s timeout, converts to retry with crop preview.</span>
+  </div>
+
+</div>
+
+<!-- ============ CAPTURE FLOW ============ -->
+<h2>2 · Capture Lead flow — selector + action bar</h2>
+<div class="grid">
+
+  <div>
+    <div class="capture-stage">
+      <div class="captured-frame"></div>
+      <div class="fake-form">
+        <div class="row"><div class="k">Customer</div><div class="v">Maria Garcia</div></div>
+        <div class="row"><div class="k">DOB</div><div class="v">06/04/1958</div></div>
+        <div class="row"><div class="k">Phone</div><div class="v">(954) 555-0142</div></div>
+        <div class="row"><div class="k">Address</div><div class="v">2417 NW 84th Ave, Hollywood FL 33024</div></div>
+        <div class="row"><div class="k">Plan</div><div class="v">— not yet enrolled —</div></div>
+      </div>
+      <div class="crosshair-note">✛ crosshair · click-drag to select lead fields</div>
+      <div class="selector" style="left: 9%; top: 18%; width: 62%; height: 45%;">
+        <div class="handle tl"></div><div class="handle tr"></div><div class="handle bl"></div><div class="handle br"></div>
+        <div class="handle t"></div><div class="handle b"></div><div class="handle l"></div><div class="handle r"></div>
+        <div class="move-grip">⇕⇔</div>
+      </div>
+      <div class="action-bar" style="left: 38%; top: calc(18% + 45% + 8px);">
+        <button class="btn primary">✦ Extract</button>
+        <button class="btn ghost">↻ Retry</button>
+        <button class="btn ghost">✕ Cancel</button>
+      </div>
+    </div>
+    <span class="note">Selector with 8 handles + center move grip. Action bar flips above the rectangle if it would clip the viewport.</span>
+  </div>
+
+  <div>
+    <div class="capture-stage">
+      <div class="captured-frame"></div>
+      <div class="fake-form">
+        <div class="row"><div class="k">Customer</div><div class="v">Maria Garcia</div></div>
+        <div class="row"><div class="k">DOB</div><div class="v">06/04/1958</div></div>
+        <div class="row"><div class="k">Phone</div><div class="v">(954) 555-0142</div></div>
+        <div class="row"><div class="k">Address</div><div class="v">2417 NW 84th Ave, Hollywood FL 33024</div></div>
+      </div>
+      <div class="selector" style="left: 9%; top: 18%; width: 62%; height: 45%; box-shadow: 0 0 0 4000px rgba(0,0,0,0.55), 0 0 24px rgba(0,123,127,0.5); animation: lowPulse 1.6s infinite;">
+        <div class="move-grip" style="font-family:var(--display);font-weight:600;font-size:10px;letter-spacing:0.1em">SENT TO CLAUDE VISION</div>
+      </div>
+      <div class="action-bar" style="left: 40%; top: calc(18% + 45% + 8px);">
+        <button class="btn primary" disabled style="opacity:0.8">
+          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;animation:spin 0.9s linear infinite"></span>
+          Extracting…
+        </button>
+        <button class="btn ghost">✕ Cancel</button>
+      </div>
+      <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+      <div class="success-toast" style="opacity:0.55;">✓ 3 fields captured — verify spelling with client</div>
+    </div>
+    <span class="note">Loading state — cropped region stays visible, teal pulse signals "in flight." On success, the overlay fades and the Lead panel's fields flash amber as they populate.</span>
+  </div>
+
+</div>
+
+<!-- ============ POLISH STRIP ============ -->
+<h2>3 · Polish — PECL · MSP · recording · audio</h2>
+<div class="grid">
+
+  <!-- PECL -->
+  <div>
+    <div class="panel">
+      <div class="pecl-head">
+        <h3>Pre-Enrollment Checklist</h3>
+        <span class="p">(PECL)</span>
+        <span class="tooltip"><span class="info-i">i</span>
+          <span class="tt">CMS Pre-Enrollment Checklist — items required before Medicare plan enrollment. Skipping items can result in enrollment reversal.</span>
+        </span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-family:var(--body);font-size:13px;">
+        <div style="display:flex;gap:8px;align-items:center;color:rgba(255,255,255,0.75)">✓ Confirmed caller identity</div>
+        <div style="display:flex;gap:8px;align-items:center;color:rgba(255,255,255,0.75)">✓ Disclosed recording</div>
+        <div style="display:flex;gap:8px;align-items:center;color:rgba(255,255,255,0.35)">○ Screened for Medicare Savings Programs</div>
+        <div style="display:flex;gap:8px;align-items:center;color:rgba(255,255,255,0.35)">○ Confirmed doctor network</div>
+      </div>
+      <div style="margin-top:10px;height:4px;border-radius:2px;background:rgba(255,255,255,0.05);overflow:hidden"><div style="width:50%;height:100%;background:linear-gradient(90deg,var(--teal),var(--teal-light))"></div></div>
+    </div>
+    <span class="note">Header now says "Pre-Enrollment Checklist (PECL)" + <span class="mono">i</span> tooltip explains the acronym + consequence.</span>
+  </div>
+
+  <!-- MSP -->
+  <div>
+    <div class="panel">
+      <span class="panel-title">Plan cards — MSP badge</span>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px">
+          <div style="flex:1">
+            <div style="font-family:var(--display);font-weight:600;font-size:13px;color:#fff">Humana Gold Plus HMO</div>
+            <div style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,0.4)">MAPD · PA: none · ★★★★½</div>
+          </div>
+          <span class="msp hover">MSP reminder</span>
+          <span style="font-family:var(--display);font-weight:700;color:var(--green);font-size:14px">$0</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px">
+          <div style="flex:1">
+            <div style="font-family:var(--display);font-weight:600;font-size:13px;color:#fff">Aetna CVS HMO-POS</div>
+            <div style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,0.4)">MAPD · PA: light · ★★★★</div>
+          </div>
+          <span class="msp covered">MSP ✓ covered</span>
+          <span style="font-family:var(--display);font-weight:700;color:var(--green);font-size:14px">$0</span>
+        </div>
+      </div>
+    </div>
+    <span class="note">Hover expands "MSP" → "MSP reminder" with tooltip. Click inserts script into AI response card and badge flips amber → teal "covered."</span>
+  </div>
+
+  <!-- Audio wave -->
+  <div>
+    <div class="panel">
+      <span class="panel-title">AudioWave — dual channel</span>
+      <div class="wave-stack" style="margin-top:10px">
+        <div class="wave-row">
+          <span class="wave-label">you</span>
+          <div class="wave you">
+            <div class="bar" style="height:18px"></div><div class="bar" style="height:8px"></div>
+            <div class="bar" style="height:22px"></div><div class="bar" style="height:14px"></div>
+            <div class="bar" style="height:26px"></div><div class="bar" style="height:10px"></div>
+            <div class="bar" style="height:18px"></div><div class="bar" style="height:24px"></div>
+            <div class="bar" style="height:12px"></div><div class="bar" style="height:20px"></div>
+            <div class="bar" style="height:16px"></div><div class="bar" style="height:22px"></div>
+            <div class="bar" style="height:8px"></div><div class="bar" style="height:14px"></div>
+            <div class="bar" style="height:24px"></div><div class="bar" style="height:10px"></div>
+            <div class="bar" style="height:18px"></div><div class="bar" style="height:22px"></div>
+          </div>
+        </div>
+        <div class="wave-row">
+          <span class="wave-label">client</span>
+          <div class="wave client">
+            <div class="bar" style="height:10px"></div><div class="bar" style="height:14px"></div>
+            <div class="bar" style="height:6px"></div><div class="bar" style="height:12px"></div>
+            <div class="bar" style="height:16px"></div><div class="bar" style="height:8px"></div>
+            <div class="bar" style="height:14px"></div><div class="bar" style="height:12px"></div>
+            <div class="bar" style="height:10px"></div><div class="bar" style="height:16px"></div>
+            <div class="bar" style="height:8px"></div><div class="bar" style="height:14px"></div>
+            <div class="bar" style="height:12px"></div><div class="bar" style="height:10px"></div>
+            <div class="bar" style="height:16px"></div><div class="bar" style="height:6px"></div>
+            <div class="bar" style="height:12px"></div><div class="bar" style="height:10px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <span class="note">Stacked waves + per-channel labels. Each binds to its own <span class="mono">AnalyserNode</span> when real audio lands.</span>
+  </div>
+
+  <!-- Recording pill + banner -->
+  <div>
+    <div class="panel">
+      <span class="panel-title">Overlay header — recording affordance</span>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;padding:8px 12px;background:rgba(0,40,42,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:10px">
+        <span class="rec-pill"><span class="dot"></span>Recording</span>
+        <span class="label" style="margin-left:auto">mode</span>
+        <span style="font-family:var(--display);font-size:11px;color:rgba(255,255,255,0.5)">float · split · tabs · full</span>
+      </div>
+      <div class="consent" style="margin-top:10px">
+        <span>🎙 MediCopilot is listening for agent suggestions. Remember to disclose recording per state requirements.</span>
+        <span class="spacer"></span>
+        <span class="x">✕</span>
+      </div>
+    </div>
+    <span class="note">Persistent red pulse + one-time session banner. Amber variant for two-party-consent states.</span>
+  </div>
+
+</div>
+
+<!-- ============ SOURCES ROW ============ -->
+<h2>4 · Trust — AI response card sources row</h2>
+<div class="panel" style="max-width:720px;">
+  <div style="font-family:var(--display);font-size:9px;font-weight:600;color:rgba(255,255,255,0.3);letter-spacing:0.05em;text-transform:uppercase;margin-bottom:6px">Context: live transcript · lead context</div>
+  <div style="font-family:var(--body);font-size:14px;color:rgba(255,255,255,0.9);line-height:1.6;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:12px 14px;">
+    Maria's ZIP (33024) is in Broward County. Based on her current Original Medicare and mention of Eliquis, the top-matched plans include $0-premium MAPD options with light PA. Confirm her PCP Dr. Patel is in-network before recommending.
+  </div>
+  <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+    <span class="pill" style="background:rgba(255,255,255,0.03);color:rgba(255,255,255,0.45);border:1px solid rgba(255,255,255,0.08)">ZIP 33024</span>
+    <span class="pill" style="background:rgba(255,255,255,0.03);color:rgba(255,255,255,0.45);border:1px solid rgba(255,255,255,0.08)">Coverage: Original Medicare</span>
+    <span class="pill" style="background:rgba(255,255,255,0.03);color:rgba(255,255,255,0.45);border:1px solid rgba(255,255,255,0.08)">Med: Eliquis</span>
+  </div>
+</div>
+<span class="note">Max 3 source chips per card. Hovering a chip rings the corresponding field in the Lead Context panel for 800ms.</span>
+
+</body>
+</html>

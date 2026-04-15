@@ -251,10 +251,37 @@ function SwitchLeadModal({ activeId, onPick, onClose }) {
 }
 
 function CaptureLeadModal({ onCommit, onClose }) {
-  const [stage, setStage] = useState("choose"); // choose | extracting | review
-  const [source, setSource] = useState(null); // "screen" | "photo" | "manual"
+  const [stage, setStage] = useState("choose"); // choose | selecting | extracting | review
+  const [source, setSource] = useState(null); // "region" | "screen" | "manual"
   const [progress, setProgress] = useState(0);
   const [extracted, setExtracted] = useState(null);
+  const [marquee, setMarquee] = useState({ x: 0, y: 0, w: 0, h: 0 });
+  const [marqueeDone, setMarqueeDone] = useState(false);
+
+  // Animate the marquee drawing in the "selecting" stage (mock drag)
+  useEffect(() => {
+    if (stage !== "selecting") return;
+    setMarqueeDone(false);
+    const target = { x: 48, y: 80, w: 310, h: 150 };
+    const startX = 78, startY = 120;
+    setMarquee({ x: startX, y: startY, w: 0, h: 0 });
+    let t = 0;
+    const iv = setInterval(() => {
+      t += 1;
+      const p = Math.min(t / 18, 1);
+      setMarquee({
+        x: startX - (startX - target.x) * p,
+        y: startY - (startY - target.y) * p,
+        w: target.w * p,
+        h: target.h * p,
+      });
+      if (p >= 1) {
+        clearInterval(iv);
+        setMarqueeDone(true);
+      }
+    }, 40);
+    return () => clearInterval(iv);
+  }, [stage]);
 
   useEffect(() => {
     if (stage !== "extracting") return;
@@ -291,6 +318,8 @@ function CaptureLeadModal({ onCommit, onClose }) {
         Coverage: { v: "", pill: "low" },
       });
       setStage("review");
+    } else if (src === "region") {
+      setStage("selecting");
     } else {
       setStage("extracting");
     }
@@ -312,7 +341,8 @@ function CaptureLeadModal({ onCommit, onClose }) {
           <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: T.teal }}>⊕ Capture lead</span>
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.3)" }}>
             {stage === "choose" && "· choose source"}
-            {stage === "extracting" && `· extracting from ${source === "screen" ? "screen" : "photo"}`}
+            {stage === "selecting" && "· drag to select a region"}
+            {stage === "extracting" && `· extracting from ${source === "region" ? "region" : "screen"}`}
             {stage === "review" && "· review & commit"}
           </span>
           <div style={{ flex: 1 }} />
@@ -324,8 +354,8 @@ function CaptureLeadModal({ onCommit, onClose }) {
         {stage === "choose" && (
           <div style={{ padding: 14, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
             {[
-              { k: "screen", icon: "🖥", title: "Screen OCR", sub: "Read Five9 pop-up or CRM window" },
-              { k: "photo", icon: "📷", title: "Photo of ID", sub: "Medicare card or driver's license" },
+              { k: "region", icon: "◩", title: "Select region", sub: "Drag a box around any fields on screen" },
+              { k: "screen", icon: "🖥", title: "Full window", sub: "Grab the active Five9 / CRM window" },
               { k: "manual", icon: "⌨", title: "Manual", sub: "Type the fields yourself" },
             ].map(o => (
               <button key={o.k} onClick={() => startExtract(o.k)} style={{
@@ -341,10 +371,103 @@ function CaptureLeadModal({ onCommit, onClose }) {
           </div>
         )}
 
+        {stage === "selecting" && (
+          <div style={{ padding: 14 }}>
+            <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.45)", marginBottom: 8 }}>
+              Crosshair active · dim layer covering desktop · drag to draw a region around the fields you want captured.
+            </div>
+            {/* Mock "desktop" with a Five9 card underneath */}
+            <div style={{
+              position: "relative", height: 240, borderRadius: 10, overflow: "hidden",
+              background: "linear-gradient(135deg, #1a2230, #0d1520)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              cursor: "crosshair",
+            }}>
+              {/* Faux Five9 lead card */}
+              <div style={{
+                position: "absolute", left: 32, top: 64, width: 340, padding: "12px 14px",
+                background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 8,
+              }}>
+                <div style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>Five9 · Inbound · 08:14</div>
+                <div style={{ fontFamily: T.body, fontSize: 11, color: "rgba(255,255,255,0.85)", lineHeight: 1.55 }}>
+                  <div><b>Caller:</b> Harold Weaver</div>
+                  <div><b>DOB:</b> 07/09/1955 · Age 70</div>
+                  <div><b>Phone:</b> (786) 555-0319</div>
+                  <div><b>Address:</b> Hialeah, FL 33013</div>
+                  <div><b>Coverage:</b> Medicare Part A only</div>
+                </div>
+              </div>
+              {/* Dimming overlay with cut-out for marquee */}
+              <div style={{
+                position: "absolute", inset: 0,
+                background: "rgba(0,0,0,0.55)",
+                clipPath: `polygon(
+                  0 0, 100% 0, 100% 100%, 0 100%, 0 0,
+                  ${marquee.x}px ${marquee.y}px,
+                  ${marquee.x}px ${marquee.y + marquee.h}px,
+                  ${marquee.x + marquee.w}px ${marquee.y + marquee.h}px,
+                  ${marquee.x + marquee.w}px ${marquee.y}px,
+                  ${marquee.x}px ${marquee.y}px
+                )`,
+              }} />
+              {/* Marquee border */}
+              {(marquee.w > 0 || marquee.h > 0) && (
+                <div style={{
+                  position: "absolute",
+                  left: marquee.x, top: marquee.y,
+                  width: marquee.w, height: marquee.h,
+                  border: `1.5px dashed ${T.teal}`,
+                  boxShadow: "0 0 0 1px rgba(0,123,127,0.3), 0 8px 24px rgba(0,123,127,0.25)",
+                  background: "rgba(0,123,127,0.05)",
+                  pointerEvents: "none",
+                }}>
+                  {marqueeDone && (
+                    <div style={{
+                      position: "absolute", top: -20, left: 0,
+                      fontFamily: T.mono, fontSize: 9, color: T.teal,
+                      padding: "2px 6px", background: "rgba(0,123,127,0.15)", borderRadius: 3,
+                    }}>
+                      {Math.round(marquee.w)} × {Math.round(marquee.h)} · region locked
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* Size label while drawing */}
+              {!marqueeDone && marquee.w > 0 && (
+                <div style={{
+                  position: "absolute",
+                  left: marquee.x + marquee.w + 6, top: marquee.y + marquee.h - 14,
+                  fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.7)",
+                  padding: "2px 6px", background: "rgba(0,0,0,0.6)", borderRadius: 3,
+                }}>
+                  {Math.round(marquee.w)} × {Math.round(marquee.h)}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button onClick={() => setStage("choose")} style={{
+                flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Back</button>
+              <button disabled={!marqueeDone} onClick={() => setStage("extracting")} style={{
+                flex: 2, padding: "9px 12px",
+                background: marqueeDone ? "linear-gradient(135deg, #007B7F, #004D50)" : "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11,
+                color: marqueeDone ? "#fff" : "rgba(255,255,255,0.3)",
+                cursor: marqueeDone ? "pointer" : "not-allowed",
+                letterSpacing: "0.04em", textTransform: "uppercase",
+              }}>{marqueeDone ? "✓ Capture region" : "Drawing…"}</button>
+            </div>
+          </div>
+        )}
+
         {stage === "extracting" && (
           <div style={{ padding: 24, textAlign: "center" }}>
             <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 10 }}>
-              Claude Vision · parsing {source === "screen" ? "screen capture" : "ID photo"}…
+              Claude Vision · parsing {source === "region" ? "selected region" : "screen capture"}…
             </div>
             <div style={{ height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden", marginBottom: 12 }}>
               <div style={{ height: "100%", width: `${progress}%`, background: `linear-gradient(90deg, ${T.teal}, #34C77B)`, transition: "width 0.2s ease" }} />

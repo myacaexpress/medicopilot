@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MediCopilot — integrated floating tool mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --teal: #007B7F; --teal-dark: #004D50; --teal-light: #1A9EA2;
+    --coral: #F47C6E; --green: #34C77B; --amber: #F5A623; --red: #E74C3C;
+    --dusk: #B0C4DE;
+    --display: 'Montserrat', sans-serif;
+    --body: 'Lora', Georgia, serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; height: 100%; font-family: var(--body); background:#000; color:#fff; }
+  body {
+    min-height: 100vh;
+    padding: 24px;
+    background:
+      radial-gradient(1200px 600px at 20% -10%, rgba(0,123,127,0.25), transparent),
+      radial-gradient(900px 500px at 110% 120%, rgba(244,124,110,0.18), transparent),
+      #0a1628;
+  }
+  h1 { font-family: var(--display); font-weight: 800; font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .caption { color: rgba(255,255,255,0.5); font-size: 13px; margin-bottom: 20px; font-style: italic; }
+  .note {
+    display: inline-block; font-family: var(--display); font-size: 10px;
+    color: rgba(255,255,255,0.45); margin-top: 6px; letter-spacing: 0.02em;
+  }
+  .note::before { content: "▸ "; color: var(--teal-light); }
+
+  /* ─── Five9 background (behind the floating copilot) ─── */
+  .stage {
+    position: relative; width: 100%; max-width: 1400px;
+    aspect-ratio: 16 / 10; margin: 0 auto; border-radius: 14px; overflow: hidden;
+    background: #0e1a30; border: 1px solid rgba(255,255,255,0.05);
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5);
+  }
+  .five9 {
+    position: absolute; inset: 0; filter: brightness(0.45) saturate(0.6);
+    background:
+      linear-gradient(180deg, #10223e 0%, #0a1628 60%);
+  }
+  .five9::before {
+    content:""; position:absolute; inset:20px; border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+  }
+  .five9-titlebar {
+    position:absolute; left:20px; right:20px; top:20px; height:28px;
+    background:#2d2d2d; border-radius: 8px 8px 0 0;
+    display:flex; align-items:center; padding: 0 10px; gap:6px;
+    font-family: -apple-system, sans-serif; font-size: 11px; color:#aaa;
+    border-bottom: 1px solid #3a3a3a;
+  }
+  .five9-titlebar .dot { width:10px; height:10px; border-radius:50%; }
+  .five9-body {
+    position:absolute; left:20px; right:20px; top:48px; bottom:20px;
+    padding: 20px 28px; font-family: var(--display); color: rgba(255,255,255,0.5);
+  }
+  .five9-body .row { display:flex; gap:14px; margin-bottom: 12px; font-size: 12px; }
+  .five9-body .k { width: 90px; color: rgba(255,255,255,0.3); text-transform:uppercase; letter-spacing:0.05em; font-size: 10px; padding-top:2px; }
+  .five9-body .v { flex:1; background: rgba(255,255,255,0.04); border-radius: 5px; padding: 4px 8px; color: rgba(255,255,255,0.65); }
+
+  /* ─── Floating copilot card (the actual product surface) ─── */
+  .copilot {
+    position: absolute; top: 6%; right: 4%; width: 62%; max-height: 90%;
+    background: rgba(0, 40, 42, 0.82);
+    backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
+    border-radius: 16px;
+    border: 1px solid rgba(0,123,127,0.35);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.4);
+    display: grid;
+    grid-template-columns: 42% 58%;
+    overflow: hidden;
+  }
+  .copilot-grip { position:absolute; top:0; left:0; right:0; height: 30px; cursor: grab; }
+  .copilot-grip::before {
+    content:""; position:absolute; top:10px; left:50%; transform:translateX(-50%);
+    width:36px; height:3px; border-radius:2px; background: rgba(255,255,255,0.15);
+  }
+  .copilot-header {
+    grid-column: 1 / span 2;
+    display:flex; align-items:center; gap: 10px;
+    padding: 10px 14px 8px; border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .brand { font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: 0.08em; color: var(--teal-light); text-transform: uppercase; }
+  .brand .m { color: rgba(255,255,255,0.55); font-weight: 500; }
+  .rec-pill {
+    display:inline-flex; align-items:center; gap:5px; padding: 3px 8px; border-radius: 999px;
+    background: rgba(231,76,60,0.1); border: 1px solid rgba(231,76,60,0.3);
+    font-family: var(--display); font-weight:700; font-size:9px; letter-spacing:0.05em; color:#ff8a7b; text-transform: uppercase;
+  }
+  .rec-pill .d { width:6px; height:6px; border-radius:50%; background:var(--red); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:0.4} 50%{opacity:1} }
+  .mode-switcher { margin-left:auto; display:flex; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 2px; gap: 2px; }
+  .mode-switcher button { font-family: var(--display); font-weight:600; font-size:9px; letter-spacing:0.05em; text-transform: uppercase; padding: 4px 8px; border-radius: 6px; border: none; background: transparent; color: rgba(255,255,255,0.5); cursor: pointer; }
+  .mode-switcher button.active { background: rgba(0,123,127,0.25); color: var(--teal-light); }
+  .win-btn { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* ─── Left column: Compliance Hub ─── */
+  .col-left {
+    border-right: 1px solid rgba(255,255,255,0.06);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .col-right { display:flex; flex-direction:column; min-height: 0; }
+
+  .compliance-hub {
+    padding: 12px;
+    background: linear-gradient(180deg, rgba(245,166,35,0.08), rgba(245,166,35,0.02));
+    border-bottom: 1px solid rgba(245,166,35,0.2);
+    position: relative;
+  }
+  .compliance-hub::before {
+    content:""; position:absolute; top:0; left:0; width: 4px; height: 100%;
+    background: linear-gradient(180deg, var(--amber), rgba(245,166,35,0));
+  }
+  .hub-head {
+    display:flex; align-items:center; gap:8px; margin-bottom: 10px;
+  }
+  .hub-title {
+    font-family: var(--display); font-weight: 800; font-size: 11px; letter-spacing: 0.12em;
+    color: var(--amber); text-transform: uppercase;
+  }
+  .hub-score {
+    margin-left:auto; display:flex; align-items:baseline; gap:3px;
+    font-family: var(--mono); font-weight:600; font-size: 12px; color: rgba(255,255,255,0.85);
+  }
+  .hub-score .den { font-size:10px; color: rgba(255,255,255,0.4); }
+  .gauge { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden; margin-bottom: 12px; }
+  .gauge .fill { height: 100%; background: linear-gradient(90deg, var(--amber), #fbc76a); border-radius: 3px; box-shadow: 0 0 12px rgba(245,166,35,0.4); }
+
+  /* ── MSP dedicated block ── */
+  .msp-card {
+    background: rgba(245,166,35,0.08);
+    border: 1px solid rgba(245,166,35,0.35);
+    border-radius: 10px; padding: 10px 12px; margin-bottom: 10px;
+    position: relative;
+  }
+  .msp-card.pulse { animation: mspPulse 2s infinite; }
+  @keyframes mspPulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(245,166,35,0.4); }
+    50% { box-shadow: 0 0 0 4px rgba(245,166,35,0); }
+  }
+  .msp-head { display:flex; align-items:center; gap:6px; margin-bottom: 6px; }
+  .msp-badge {
+    display:inline-flex; align-items:center; gap:4px;
+    padding: 2px 6px; border-radius: 4px;
+    background: var(--amber); color: #1a1200;
+    font-family: var(--display); font-weight: 800; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .msp-title { font-family: var(--display); font-weight: 700; font-size: 12px; color: #ffd699; letter-spacing: 0.01em; }
+  .msp-body {
+    font-family: var(--body); font-size: 11px; color: rgba(255,255,255,0.72); line-height: 1.5;
+    margin-bottom: 8px;
+  }
+  .msp-actions { display:flex; gap: 6px; }
+  .msp-actions .btn {
+    font-family: var(--display); font-weight: 700; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 6px 10px; border-radius: 6px; cursor:pointer;
+    display:inline-flex; align-items:center; gap:4px; border:1px solid transparent;
+  }
+  .msp-actions .btn.primary { background: linear-gradient(135deg, var(--teal), var(--teal-dark)); color:#fff; border-color: rgba(255,255,255,0.08); box-shadow: 0 3px 10px rgba(0,123,127,0.3); }
+  .msp-actions .btn.ghost { background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.6); border-color: rgba(255,255,255,0.08); }
+
+  /* MSP covered variant */
+  .msp-card.covered { background: rgba(0,123,127,0.1); border-color: rgba(0,123,127,0.4); animation: none; }
+  .msp-card.covered .msp-badge { background: var(--green); color: #013014; }
+  .msp-card.covered .msp-title { color: #a9e7d1; }
+
+  /* ── PECL block ── */
+  .pecl-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px; padding: 10px 12px;
+  }
+  .pecl-head {
+    display:flex; align-items:baseline; gap:6px; margin-bottom: 8px;
+  }
+  .pecl-title { font-family: var(--display); font-weight: 700; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: rgba(255,255,255,0.85); }
+  .pecl-title .p { font-weight: 500; font-size: 10px; color: rgba(255,255,255,0.4); margin-left: 4px; }
+  .info-i { width:13px; height:13px; border-radius:50%; background: rgba(255,255,255,0.08); display:inline-flex; align-items:center; justify-content:center; font-family: var(--mono); font-size: 9px; color: rgba(255,255,255,0.6); cursor:help; }
+  .pecl-prog { font-family: var(--mono); font-size: 10px; color: rgba(255,255,255,0.5); margin-left: auto; }
+  .pecl-list { display:flex; flex-direction: column; gap: 4px; }
+  .pecl-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 6px;
+    font-family: var(--body); font-size: 12px;
+  }
+  .pecl-row .risk-dot { width: 8px; height: 8px; border-radius: 50%; flex:none; }
+  .pecl-row .risk-dot.req { background: var(--red); box-shadow: 0 0 6px rgba(231,76,60,0.5); }
+  .pecl-row .risk-dot.rec { background: var(--amber); }
+  .pecl-row .risk-dot.done { background: var(--green); box-shadow: 0 0 6px rgba(52,199,123,0.5); }
+  .pecl-row .label { flex: 1; }
+  .pecl-row.done { background: rgba(52,199,123,0.04); color: rgba(255,255,255,0.55); text-decoration: line-through; text-decoration-color: rgba(52,199,123,0.4); }
+  .pecl-row.pending { background: rgba(231,76,60,0.05); color: rgba(255,255,255,0.9); }
+  .pecl-row.recommended { color: rgba(255,255,255,0.7); }
+  .pecl-row .tag { font-family: var(--display); font-weight: 700; font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 5px; border-radius: 3px; }
+  .pecl-row .tag.req { background: rgba(231,76,60,0.15); color: #ff8a7b; }
+  .pecl-row .tag.rec { background: rgba(245,166,35,0.12); color: var(--amber); }
+
+  /* ── Lead Context on right column ── */
+  .lead-panel {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: linear-gradient(180deg, rgba(0,123,127,0.06), transparent);
+  }
+  .lead-head { display:flex; align-items:center; gap:8px; margin-bottom: 8px; }
+  .lead-title { font-family: var(--display); font-weight: 700; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: rgba(255,255,255,0.7); }
+  .lead-source { font-family: var(--mono); font-size: 9px; color: rgba(255,255,255,0.3); }
+  .ready { display:inline-flex; align-items:center; gap:4px; font-family: var(--display); font-weight:600; font-size:9px; color: var(--green); letter-spacing:0.06em; text-transform: uppercase; margin-left: 6px; }
+  .ready::before { content:""; width:6px; height:6px; border-radius:50%; background: var(--green); box-shadow: 0 0 6px rgba(52,199,123,0.7); }
+  .lead-actions { margin-left:auto; display:flex; gap: 6px; }
+  .btn-small {
+    font-family: var(--display); font-weight:700; font-size: 9px; letter-spacing:0.04em; text-transform: uppercase;
+    padding: 4px 8px; border-radius: 6px; cursor:pointer; border: 1px solid transparent;
+  }
+  .btn-small.primary { background: linear-gradient(135deg, var(--teal), var(--teal-dark)); color:#fff; border-color: rgba(255,255,255,0.08); }
+  .btn-small.ghost { background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.55); border-color: rgba(255,255,255,0.08); }
+  .lead-grid {
+    display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px 8px;
+  }
+  .lead-grid .wide { grid-column: span 2; }
+  .field {
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.04);
+    border-radius: 6px; padding: 4px 7px;
+  }
+  .field .k { font-family: var(--display); font-weight: 600; font-size: 8px; letter-spacing: 0.05em; text-transform: uppercase; color: rgba(255,255,255,0.4); }
+  .field .v-row { display:flex; align-items:center; gap: 4px; min-height: 16px; }
+  .field .v { font-family: var(--body); font-size: 11px; color: rgba(255,255,255,0.9); flex:1; line-height: 1.35; }
+  .pencil { color: rgba(255,255,255,0.22); font-size: 9px; cursor:pointer; }
+  .pencil:hover { color: var(--teal-light); }
+  .pill {
+    font-family: var(--mono); font-size: 8px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 1px 4px; border-radius: 8px; line-height: 1.3; border: 1px solid transparent; white-space: nowrap;
+  }
+  .pill.verified { background: rgba(52,199,123,0.15); color: var(--green); border-color: rgba(52,199,123,0.3); }
+  .pill.high { background: rgba(0,123,127,0.18); color: var(--teal-light); border-color: rgba(0,123,127,0.35); }
+  .pill.medium { background: rgba(245,166,35,0.08); color: var(--amber); border-color: rgba(245,166,35,0.35); }
+
+  /* ── Transcript on right column ── */
+  .transcript {
+    padding: 8px 12px; flex: 1; overflow: auto; min-height: 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .tr-head { display:flex; align-items:center; gap: 6px; margin-bottom: 6px; }
+  .tr-head .label { font-family: var(--display); font-weight: 600; font-size: 9px; letter-spacing: 0.05em; text-transform: uppercase; color: rgba(255,255,255,0.3); }
+  .tr-line { display:flex; gap:8px; padding: 3px 0; align-items: flex-start; border-bottom: 1px solid rgba(255,255,255,0.03); }
+  .tr-line .t { font-family: var(--mono); font-size: 9px; color: rgba(255,255,255,0.15); min-width: 28px; }
+  .tr-line .s { font-family: var(--display); font-size: 9px; font-weight: 600; min-width: 36px; letter-spacing: 0.04em; }
+  .tr-line .s.agent { color: rgba(255,255,255,0.3); }
+  .tr-line .s.client { color: var(--coral); }
+  .tr-line .text { font-family: var(--body); font-size: 11px; color: rgba(255,255,255,0.55); line-height: 1.5; flex: 1; }
+  .tr-line .text.q { color: rgba(255,255,255,0.88); font-weight: 500; }
+  .q-tag { display:inline-block; margin-left:4px; font-family: var(--display); font-weight: 700; font-size: 8px; color: var(--teal-light); background: rgba(0,123,127,0.15); padding: 1px 4px; border-radius: 3px; letter-spacing: 0.05em; }
+
+  /* ── AI response ── */
+  .ai-card { padding: 10px 12px; }
+  .ai-head { display:flex; align-items:center; gap: 6px; margin-bottom: 4px; }
+  .ai-brand { font-family: var(--display); font-weight: 600; font-size: 9px; color: rgba(255,255,255,0.3); }
+  .ai-body {
+    padding: 10px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px 12px 12px 4px;
+  }
+  .ai-resp { font-family: var(--body); font-size: 12px; color: rgba(255,255,255,0.88); line-height: 1.55; }
+  .plan-row {
+    display:flex; justify-content:space-between; align-items:center;
+    padding: 6px 8px; margin-top: 5px; background: rgba(255,255,255,0.02);
+    border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);
+  }
+  .plan-row .n { font-family: var(--display); font-weight: 600; font-size: 11px; color: #fff; }
+  .plan-row .m { font-family: var(--mono); font-size: 9px; color: rgba(255,255,255,0.3); margin-top: 1px; display:flex; gap: 6px; align-items: center; }
+  .plan-row .cp { font-family: var(--display); font-weight: 700; font-size: 12px; color: var(--green); }
+
+  /* MSP badge on plan rows — now LOUD */
+  .msp-inline {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 2px 6px; border-radius: 4px;
+    background: var(--amber); color: #1a1200;
+    font-family: var(--display); font-weight: 800; font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase;
+    cursor: pointer; position: relative;
+  }
+  .msp-inline.covered { background: var(--green); color: #013014; }
+  .msp-inline::before {
+    content:"!"; width: 10px; height: 10px; border-radius: 50%; background: #1a1200; color: var(--amber); font-size: 8px; display:inline-flex; align-items:center; justify-content:center; font-weight:800;
+  }
+  .msp-inline.covered::before { content:"✓"; background:#013014; color: var(--green); }
+
+  /* Sources row */
+  .sources { display:flex; gap:4px; margin-top: 6px; flex-wrap: wrap; }
+  .src {
+    font-family: var(--mono); font-size: 8px; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 1px 5px; border-radius: 6px;
+    background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.45);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  /* Input bar at bottom */
+  .input-bar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 10px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    background: rgba(0,40,42,0.5);
+  }
+  .input-bar .inp {
+    flex:1; display:flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; padding: 4px 10px;
+    font-family: var(--body); font-size: 12px; color: rgba(255,255,255,0.55);
+  }
+  .ask-ai {
+    font-family: var(--display); font-weight: 700; font-size: 11px; letter-spacing: 0.04em;
+    padding: 6px 12px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--teal), var(--teal-dark));
+    color: #fff; border: none; cursor: pointer;
+    box-shadow: 0 3px 10px rgba(0,123,127,0.3);
+  }
+
+  /* Audio wave in header */
+  .audio-mini {
+    display:flex; gap: 2px; align-items: end; height: 16px; margin-right: 8px;
+  }
+  .audio-mini .bar { width: 2px; background: var(--teal-light); border-radius: 1px; }
+  .audio-mini .client .bar { background: var(--coral); opacity: 0.6; }
+
+  /* Responsive — stack columns below 900px */
+  @media (max-width: 900px) {
+    .copilot { grid-template-columns: 1fr; width: 92%; right: 4%; top: 4%; }
+    .col-left { border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  }
+
+  /* Section label */
+  .callout {
+    position: absolute; background: rgba(26,158,162,0.12); border: 1px solid rgba(26,158,162,0.4);
+    color: var(--teal-light);
+    font-family: var(--display); font-weight: 700; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 4px 8px; border-radius: 6px;
+    backdrop-filter: blur(10px);
+  }
+  .callout .arrow {
+    position: absolute; width: 8px; height: 8px; background: inherit; border: inherit;
+    transform: rotate(45deg);
+  }
+</style>
+</head>
+<body>
+
+<h1>MediCopilot — integrated floating tool mockup</h1>
+<div class="caption">New surfaces shown inside the actual Cluely-style floating overlay. PECL + MSP elevated to a top-of-card "Compliance Hub" — compliance affordances can no longer be missed.</div>
+
+<div class="stage">
+
+  <!-- Dimmed Five9 background (what the agent sees behind the copilot) -->
+  <div class="five9"></div>
+  <div class="five9-titlebar">
+    <div class="dot" style="background:#FF5F57"></div>
+    <div class="dot" style="background:#FFBD2E"></div>
+    <div class="dot" style="background:#28C840"></div>
+    <div style="margin: 0 auto; color:#aaa">Five9 Agent Desktop — Active Call</div>
+  </div>
+  <div class="five9-body">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom: 14px;">
+      <div style="width:8px;height:8px;border-radius:50%;background:#34C77B;box-shadow:0 0 6px rgba(52,199,123,0.5)"></div>
+      <span style="font-family:var(--display);font-weight:700;font-size:12px;color:#34C77B;letter-spacing:0.05em">CONNECTED</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--dusk)">08:12</span>
+      <span style="font-family:var(--mono);font-size:10px;color:#666;margin-left:auto">Campaign: AEP_MAPD_FL</span>
+    </div>
+    <div class="row"><div class="k">Caller</div><div class="v">Maria Garcia</div></div>
+    <div class="row"><div class="k">Phone</div><div class="v">(954) 555-0142</div></div>
+    <div class="row"><div class="k">DOB</div><div class="v">06/04/1958 — Age 67</div></div>
+    <div class="row"><div class="k">ZIP</div><div class="v">33024 — Hollywood, FL</div></div>
+    <div class="row"><div class="k">Coverage</div><div class="v">Original Medicare</div></div>
+    <div class="row"><div class="k">Lead</div><div class="v">Five9 screen-pop · AllCalls</div></div>
+  </div>
+
+  <!-- Floating Copilot card (the actual product surface) -->
+  <div class="copilot">
+    <div class="copilot-grip"></div>
+
+    <!-- Header: brand · recording · mode switcher -->
+    <div class="copilot-header">
+      <div class="win-btn" style="background:#FF5F57"></div>
+      <div class="win-btn" style="background:#FFBD2E"></div>
+      <div class="win-btn" style="background:#28C840"></div>
+      <div style="width: 8px"></div>
+      <span class="brand">Medi<span class="m">Copilot</span></span>
+      <span class="rec-pill"><span class="d"></span>Recording</span>
+      <div class="audio-mini">
+        <div class="bar" style="height:10px"></div><div class="bar" style="height:6px"></div>
+        <div class="bar" style="height:14px"></div><div class="bar" style="height:8px"></div>
+        <div class="bar" style="height:12px"></div><div class="bar" style="height:5px"></div>
+        <div class="bar" style="height:10px"></div><div class="bar" style="height:7px"></div>
+      </div>
+      <div class="mode-switcher">
+        <button>Float</button>
+        <button class="active">Split</button>
+        <button>Tabs</button>
+        <button>Full</button>
+      </div>
+    </div>
+
+    <!-- LEFT column: Compliance Hub + Call info snippet -->
+    <div class="col-left">
+
+      <!-- ═══ Compliance Hub — NOW PROMINENT ═══ -->
+      <div class="compliance-hub">
+        <div class="hub-head">
+          <span style="font-family:var(--display);color:var(--amber);font-size:14px;line-height:1">⚠</span>
+          <span class="hub-title">Compliance Hub</span>
+          <span class="hub-score"><span style="color:var(--amber)">3</span>/5<span class="den"></span></span>
+        </div>
+        <div class="gauge"><div class="fill" style="width:60%"></div></div>
+
+        <!-- MSP DEDICATED CARD — this is the "must do" call-to-action -->
+        <div class="msp-card pulse">
+          <div class="msp-head">
+            <span class="msp-badge">⚠ Action Required</span>
+            <span class="msp-title">Medicare Savings Programs</span>
+          </div>
+          <div class="msp-body">
+            You must offer to screen for MSP eligibility before recommending any plan. Skipping = potential enrollment reversal.
+          </div>
+          <div class="msp-actions">
+            <button class="btn primary">⊕ Insert MSP script</button>
+            <button class="btn ghost">Mark covered</button>
+          </div>
+        </div>
+
+        <!-- PECL list — color-coded by risk -->
+        <div class="pecl-card">
+          <div class="pecl-head">
+            <span class="pecl-title">Pre-Enrollment Checklist <span class="p">(PECL)</span></span>
+            <span class="info-i" title="CMS Pre-Enrollment Checklist">i</span>
+            <span class="pecl-prog">3 / 5</span>
+          </div>
+          <div class="pecl-list">
+            <div class="pecl-row done">
+              <span class="risk-dot done"></span>
+              <span class="label">TPMO Disclaimer read</span>
+              <span class="tag" style="background:rgba(52,199,123,0.12); color: var(--green)">done</span>
+            </div>
+            <div class="pecl-row done">
+              <span class="risk-dot done"></span>
+              <span class="label">Low-Income Subsidy screened</span>
+              <span class="tag" style="background:rgba(52,199,123,0.12); color: var(--green)">done</span>
+            </div>
+            <div class="pecl-row pending">
+              <span class="risk-dot req"></span>
+              <span class="label">Medicare Savings offered</span>
+              <span class="tag req">required</span>
+            </div>
+            <div class="pecl-row recommended">
+              <span class="risk-dot rec"></span>
+              <span class="label">Medigap rights confirmed</span>
+              <span class="tag rec">rec</span>
+            </div>
+            <div class="pecl-row done">
+              <span class="risk-dot done"></span>
+              <span class="label">Scope of Appointment captured</span>
+              <span class="tag" style="background:rgba(52,199,123,0.12); color: var(--green)">done</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Call info below the compliance hub (condensed) -->
+      <div style="padding: 10px 12px; border-top: 1px solid rgba(255,255,255,0.06); flex: 1; overflow: auto;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom: 8px;">
+          <div style="width:7px;height:7px;border-radius:50%;background:#34C77B;box-shadow:0 0 6px rgba(52,199,123,0.5)"></div>
+          <span style="font-family:var(--display);font-weight:700;font-size:11px;color:#34C77B;letter-spacing:0.05em">CONNECTED</span>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--dusk)">08:12</span>
+          <span style="font-family:var(--mono);font-size:9px;color:#666;margin-left:auto">AEP_MAPD_FL</span>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:4px; margin-bottom:8px">
+          <button style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 2px;cursor:pointer;font-family:var(--display);font-size:9px;color:#aaa">🎤 Mute</button>
+          <button style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 2px;cursor:pointer;font-family:var(--display);font-size:9px;color:#aaa">⏸ Hold</button>
+          <button style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 2px;cursor:pointer;font-family:var(--display);font-size:9px;color:#aaa">↗ Xfer</button>
+          <button style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 2px;cursor:pointer;font-family:var(--display);font-size:9px;color:#aaa">📋 Disp</button>
+          <button style="background:rgba(231,76,60,0.25);border:1px solid rgba(231,76,60,0.4);border-radius:6px;padding:6px 2px;cursor:pointer;font-family:var(--display);font-size:9px;color:#ff8a7b">📕 End</button>
+        </div>
+        <div style="font-family:var(--mono); font-size:9px;color:rgba(255,255,255,0.3);margin-top:4px">Draggable · resizable · Float / Split / Tabs / Full</div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT column: Lead Context · Transcript · AI response · Input -->
+    <div class="col-right">
+
+      <!-- ═══ NEW: Lead Context panel ═══ -->
+      <div class="lead-panel">
+        <div class="lead-head">
+          <span class="lead-title">Lead context</span>
+          <span class="lead-source">· Five9 screen-pop</span>
+          <span class="ready">Ready</span>
+          <div class="lead-actions">
+            <button class="btn-small ghost">Switch</button>
+            <button class="btn-small primary">⊕ Capture Lead</button>
+          </div>
+        </div>
+        <div class="lead-grid">
+          <div class="field">
+            <div class="k">Name</div>
+            <div class="v-row"><span class="v">Maria Garcia</span><span class="pill high">high</span><span class="pencil">✎</span></div>
+          </div>
+          <div class="field">
+            <div class="k">DOB</div>
+            <div class="v-row"><span class="v">Jun 4, 1958</span><span class="pill verified">✓ verified</span><span class="pencil">✎</span></div>
+          </div>
+          <div class="field">
+            <div class="k">Phone</div>
+            <div class="v-row"><span class="v">(954) 555-0142</span><span class="pill high">high</span><span class="pencil">✎</span></div>
+          </div>
+          <div class="field wide">
+            <div class="k">Address · ZIP</div>
+            <div class="v-row"><span class="v">2417 NW 84th Ave, Hollywood FL <strong>33024</strong></span><span class="pill verified">✓ verified</span><span class="pencil">✎</span></div>
+          </div>
+          <div class="field">
+            <div class="k">Coverage</div>
+            <div class="v-row"><span class="v">Original Medicare</span><span class="pill high">high</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Transcript (live) -->
+      <div class="transcript">
+        <div class="tr-head">
+          <span style="font-family:var(--display);font-size:10px">🎙</span>
+          <span class="label">Live Transcript</span>
+          <span style="margin-left:auto;font-family:var(--mono);font-size:9px;color:rgba(0,123,127,0.6)">Five9 — Maria Garcia, 33024</span>
+        </div>
+        <div class="tr-line">
+          <span class="t">08:02</span><span class="s agent">Agent</span>
+          <span class="text">Good morning Maria, this is Shawn calling about your Medicare options. Do you have a few minutes?</span>
+        </div>
+        <div class="tr-line">
+          <span class="t">08:06</span><span class="s client">Client</span>
+          <span class="text q">My neighbor said I might qualify for help paying for my Part B. Is that true?<span class="q-tag">? DETECTED</span></span>
+        </div>
+        <div class="tr-line">
+          <span class="t">08:11</span><span class="s agent">Agent</span>
+          <span class="text">Great question — let me check what you might qualify for based on your ZIP.</span>
+        </div>
+      </div>
+
+      <!-- AI response card — with MSP inline + sources row -->
+      <div class="ai-card">
+        <div class="ai-head">
+          <span style="color:var(--teal-light);font-size:10px">🤖</span>
+          <span class="ai-brand">MediCopilot</span>
+          <span style="margin-left:auto;font-family:var(--mono);font-size:8px;color:rgba(52,199,123,0.5);background:rgba(52,199,123,0.06);padding:1px 4px;border-radius:3px">🎙 audio</span>
+          <span style="font-family:var(--mono);font-size:8px;color:rgba(0,123,127,0.5);background:rgba(0,123,127,0.06);padding:1px 4px;border-radius:3px">🖥 screen</span>
+        </div>
+        <div class="ai-body">
+          <div class="ai-resp">
+            <strong>Great opening — client just asked about MSP directly.</strong> Confirm she qualifies based on income, then recommend $0-premium MAPDs in Broward. Her PCP Dr. Patel is in-network on the top two.
+          </div>
+          <div class="plan-row">
+            <div>
+              <div class="n">Humana Gold Plus HMO</div>
+              <div class="m">MAPD · PA: none · ★★★★½ · <span class="msp-inline"> MSP</span></div>
+            </div>
+            <span class="cp">$0</span>
+          </div>
+          <div class="plan-row">
+            <div>
+              <div class="n">Aetna CVS HMO-POS</div>
+              <div class="m">MAPD · PA: light · ★★★★ · <span class="msp-inline covered"> MSP covered</span></div>
+            </div>
+            <span class="cp">$0</span>
+          </div>
+          <div style="margin-top:8px; padding:8px 10px; background:rgba(0,123,127,0.08); border-left: 2px solid var(--teal); border-radius: 0 6px 6px 0">
+            <div style="font-family:var(--display);font-size:9px;font-weight:700;color:var(--teal-light);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Say this</div>
+            <div style="font-family:var(--body);font-style:italic;font-size:11px;color:rgba(255,255,255,0.7);line-height:1.5">
+              "Mrs. Garcia, I'm required to mention Medicare Savings Programs — state programs that can help with your Part B premium. Would you like me to check if you might qualify?"
+            </div>
+          </div>
+          <div class="sources">
+            <span class="src">ZIP 33024</span>
+            <span class="src">Coverage: Original Medicare</span>
+            <span class="src">PCP: Dr. Patel</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Input bar -->
+      <div class="input-bar">
+        <div class="inp"><span>Ask about coverage, plans, compliance…</span></div>
+        <button class="ask-ai">⚡ Ask AI</button>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<div style="max-width:1400px; margin: 24px auto 0; display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+  <div style="padding: 14px; background: rgba(245,166,35,0.06); border: 1px solid rgba(245,166,35,0.25); border-radius: 10px;">
+    <div style="font-family:var(--display); font-weight:700; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--amber); margin-bottom:6px">Why PECL + MSP moved up</div>
+    <div style="font-family:var(--body); font-size:12px; color:rgba(255,255,255,0.75); line-height:1.55">
+      Compliance is the single highest-stakes surface in Medicare sales. Before: PECL lived in a muted footer on the Call Info tab — easy to miss. After: a dedicated <strong>Compliance Hub</strong> sits at the top of the copilot card's left column with an amber-tinted gradient, progress gauge, and MSP broken out as a pulsing action-required card. The agent cannot start selling plans without it in their peripheral vision.
+    </div>
+  </div>
+  <div style="padding: 14px; background: rgba(0,123,127,0.06); border: 1px solid rgba(0,123,127,0.25); border-radius: 10px;">
+    <div style="font-family:var(--display); font-weight:700; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--teal-light); margin-bottom:6px">New compliance affordances</div>
+    <div style="font-family:var(--body); font-size:12px; color:rgba(255,255,255,0.75); line-height:1.55">
+      <strong>Compliance score</strong> (3/5) with gauge · color-coded <strong>risk dots</strong> (red = required, amber = recommended, green = done) · <strong>required/rec tags</strong> per row · <strong>MSP card</strong> with one-click "Insert script" button that pushes the disclosure into the active AI response · plan cards carry a loud solid-amber <strong>MSP</strong> badge until covered, then flip solid-green.
+    </div>
+  </div>
+  <div style="padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;">
+    <div style="font-family:var(--display); font-weight:700; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.7); margin-bottom:6px">Trade-off called out</div>
+    <div style="font-family:var(--body); font-size:12px; color:rgba(255,255,255,0.75); line-height:1.55">
+      The Compliance Hub eats ~180px of vertical space on the left column. That's deliberate: if compliance doesn't feel heavy, it won't get respected. In float-only mode (no split), the hub collapses to a single strip showing only the gauge + "⚠ 2 required" — tap-to-expand returns the full hub.
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
