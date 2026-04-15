@@ -147,24 +147,298 @@ function RecordingPill({ audioOn }) {
   );
 }
 
+const MOCK_LEADS = {
+  maria: {
+    id: "maria", source: "Five9 screen-pop",
+    fields: [
+      { k: "Name", v: "Maria Garcia", pill: "high" },
+      { k: "DOB", v: "Mar 15, 1952", pill: "verified" },
+      { k: "Phone", v: "(954) 555-0142", pill: "high" },
+      { k: "Address · ZIP", v: "Pembroke Pines, FL 33024", pill: "verified", wide: true },
+      { k: "Coverage", v: "Original Medicare + PDP", pill: "high" },
+    ],
+  },
+  roberto: {
+    id: "roberto", source: "CRM · Spouse record",
+    fields: [
+      { k: "Name", v: "Roberto Garcia", pill: "verified" },
+      { k: "DOB", v: "Aug 02, 1950", pill: "verified" },
+      { k: "Phone", v: "(954) 555-0142", pill: "medium" },
+      { k: "Address · ZIP", v: "Pembroke Pines, FL 33024", pill: "verified", wide: true },
+      { k: "Coverage", v: "MA-PD (Humana H1036-206)", pill: "verified" },
+    ],
+  },
+  linda: {
+    id: "linda", source: "CRM · Prior callback",
+    fields: [
+      { k: "Name", v: "Linda Nguyen", pill: "verified" },
+      { k: "DOB", v: "Nov 22, 1948", pill: "verified" },
+      { k: "Phone", v: "(305) 555-0188", pill: "high" },
+      { k: "Address · ZIP", v: "Miami, FL 33176", pill: "verified", wide: true },
+      { k: "Coverage", v: "Turning 65 · no coverage yet", pill: "medium" },
+    ],
+  },
+};
+
+const RECENT_LEADS = [
+  { id: "maria", name: "Maria Garcia", sub: "(954) 555-0142 · 33024 · Original+PDP", tag: "Active · Five9" },
+  { id: "roberto", name: "Roberto Garcia", sub: "(954) 555-0142 · 33024 · MA-PD Humana", tag: "Spouse on line" },
+  { id: "linda", name: "Linda Nguyen", sub: "(305) 555-0188 · 33176 · T65, no coverage", tag: "Callback · 3d ago" },
+];
+
+function SwitchLeadModal({ activeId, onPick, onClose }) {
+  const [q, setQ] = useState("");
+  const filtered = RECENT_LEADS.filter(l =>
+    l.name.toLowerCase().includes(q.toLowerCase()) || l.sub.toLowerCase().includes(q.toLowerCase())
+  );
+  return (
+    <div data-no-drag="true" style={{
+      position: "absolute", inset: 0, zIndex: 200,
+      background: "rgba(10,12,16,0.55)", backdropFilter: "blur(6px)",
+      display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 60,
+      cursor: "default",
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: "min(420px, 90%)", background: "rgba(20,26,32,0.96)",
+        border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14,
+        boxShadow: "0 16px 48px rgba(0,0,0,0.5)", overflow: "hidden",
+      }}>
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 8 }}>
+          <User size={12} color={T.teal} />
+          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.85)" }}>Switch active lead</span>
+          <div style={{ flex: 1 }} />
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
+            <X size={14} color="rgba(255,255,255,0.4)" />
+          </button>
+        </div>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search name, phone, or ZIP…" style={{
+            width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 8, padding: "8px 10px", color: "#fff", outline: "none",
+            fontFamily: T.body, fontSize: 12,
+          }} />
+        </div>
+        <div style={{ maxHeight: 260, overflowY: "auto" }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: 20, textAlign: "center", fontFamily: T.mono, fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
+              No matches · try Capture Lead
+            </div>
+          )}
+          {filtered.map(l => (
+            <button key={l.id} onClick={() => onPick(l.id)} style={{
+              width: "100%", display: "block", textAlign: "left", cursor: "pointer",
+              padding: "10px 14px", background: l.id === activeId ? "rgba(0,123,127,0.1)" : "transparent",
+              border: "none", borderBottom: "1px solid rgba(255,255,255,0.04)",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: T.display, fontWeight: 600, fontSize: 13, color: "#fff" }}>{l.name}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: 2 }}>{l.sub}</div>
+                </div>
+                <span style={{ fontFamily: T.display, fontWeight: 600, fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase", color: l.id === activeId ? T.teal : "rgba(255,255,255,0.35)" }}>
+                  {l.id === activeId ? "● Active" : l.tag}
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+        <div style={{ padding: "8px 14px", borderTop: "1px solid rgba(255,255,255,0.06)", fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.3)" }}>
+          Switching re-anchors PECL, plans, and sources to the new lead.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CaptureLeadModal({ onCommit, onClose }) {
+  const [stage, setStage] = useState("choose"); // choose | extracting | review
+  const [source, setSource] = useState(null); // "screen" | "photo" | "manual"
+  const [progress, setProgress] = useState(0);
+  const [extracted, setExtracted] = useState(null);
+
+  useEffect(() => {
+    if (stage !== "extracting") return;
+    setProgress(0);
+    const iv = setInterval(() => {
+      setProgress(p => {
+        const np = p + 12;
+        if (np >= 100) {
+          clearInterval(iv);
+          setExtracted({
+            Name: { v: "Harold Weaver", pill: "high" },
+            DOB: { v: "Jul 09, 1955", pill: "medium" },
+            Phone: { v: "(786) 555-0319", pill: "high" },
+            "Address · ZIP": { v: "Hialeah, FL 33013", pill: "medium" },
+            Coverage: { v: "Original Medicare (Part A only)", pill: "low" },
+          });
+          setStage("review");
+          return 100;
+        }
+        return np;
+      });
+    }, 180);
+    return () => clearInterval(iv);
+  }, [stage]);
+
+  const startExtract = (src) => {
+    setSource(src);
+    if (src === "manual") {
+      setExtracted({
+        Name: { v: "", pill: "low" },
+        DOB: { v: "", pill: "low" },
+        Phone: { v: "", pill: "low" },
+        "Address · ZIP": { v: "", pill: "low" },
+        Coverage: { v: "", pill: "low" },
+      });
+      setStage("review");
+    } else {
+      setStage("extracting");
+    }
+  };
+
+  return (
+    <div data-no-drag="true" style={{
+      position: "absolute", inset: 0, zIndex: 200,
+      background: "rgba(10,12,16,0.6)", backdropFilter: "blur(6px)",
+      display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 48,
+      cursor: "default",
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: "min(460px, 92%)", background: "rgba(20,26,32,0.96)",
+        border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14,
+        boxShadow: "0 16px 48px rgba(0,0,0,0.5)", overflow: "hidden",
+      }}>
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: T.teal }}>⊕ Capture lead</span>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.3)" }}>
+            {stage === "choose" && "· choose source"}
+            {stage === "extracting" && `· extracting from ${source === "screen" ? "screen" : "photo"}`}
+            {stage === "review" && "· review & commit"}
+          </span>
+          <div style={{ flex: 1 }} />
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
+            <X size={14} color="rgba(255,255,255,0.4)" />
+          </button>
+        </div>
+
+        {stage === "choose" && (
+          <div style={{ padding: 14, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            {[
+              { k: "screen", icon: "🖥", title: "Screen OCR", sub: "Read Five9 pop-up or CRM window" },
+              { k: "photo", icon: "📷", title: "Photo of ID", sub: "Medicare card or driver's license" },
+              { k: "manual", icon: "⌨", title: "Manual", sub: "Type the fields yourself" },
+            ].map(o => (
+              <button key={o.k} onClick={() => startExtract(o.k)} style={{
+                padding: "14px 10px", background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10,
+                cursor: "pointer", textAlign: "left", color: "#fff",
+              }}>
+                <div style={{ fontSize: 22, marginBottom: 6 }}>{o.icon}</div>
+                <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: "#fff" }}>{o.title}</div>
+                <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 3, lineHeight: 1.35 }}>{o.sub}</div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {stage === "extracting" && (
+          <div style={{ padding: 24, textAlign: "center" }}>
+            <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 10 }}>
+              Claude Vision · parsing {source === "screen" ? "screen capture" : "ID photo"}…
+            </div>
+            <div style={{ height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden", marginBottom: 12 }}>
+              <div style={{ height: "100%", width: `${progress}%`, background: `linear-gradient(90deg, ${T.teal}, #34C77B)`, transition: "width 0.2s ease" }} />
+            </div>
+            <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.35)" }}>
+              {progress < 30 && "Locating fields…"}
+              {progress >= 30 && progress < 70 && "Extracting name, DOB, ZIP, coverage…"}
+              {progress >= 70 && "Scoring confidence…"}
+            </div>
+          </div>
+        )}
+
+        {stage === "review" && extracted && (
+          <div style={{ padding: 14 }}>
+            <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.4)", marginBottom: 10 }}>
+              Review fields. Anything below "high" confidence should be verbally confirmed with the caller before committing.
+            </div>
+            <div style={{ display: "grid", gap: 6 }}>
+              {Object.entries(extracted).map(([k, f]) => (
+                <div key={k} style={{
+                  background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)",
+                  borderRadius: 8, padding: "8px 10px",
+                  display: "flex", alignItems: "center", gap: 8,
+                }}>
+                  <div style={{ fontFamily: T.display, fontWeight: 600, fontSize: 9, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", width: 92 }}>{k}</div>
+                  <input
+                    value={f.v}
+                    onChange={e => setExtracted(prev => ({ ...prev, [k]: { ...f, v: e.target.value, pill: e.target.value ? "verified" : "low" } }))}
+                    placeholder="—"
+                    style={{
+                      flex: 1, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+                      borderRadius: 6, padding: "5px 8px", color: "#fff", outline: "none",
+                      fontFamily: T.body, fontSize: 12,
+                    }}
+                  />
+                  <ConfidencePill level={f.pill} />
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button onClick={onClose} style={{
+                flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Cancel</button>
+              <button onClick={() => onCommit(extracted)} style={{
+                flex: 2, padding: "9px 12px",
+                background: "linear-gradient(135deg, #007B7F, #004D50)",
+                border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "#fff", cursor: "pointer",
+                letterSpacing: "0.04em", textTransform: "uppercase",
+              }}>Commit as active lead</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function LeadContextPanel({ scaledFont = (x) => x }) {
-  const fields = [
-    { k: "Name", v: "Maria Garcia", pill: "high" },
-    { k: "DOB", v: "Mar 15, 1952", pill: "verified" },
-    { k: "Phone", v: "(954) 555-0142", pill: "high" },
-    { k: "Address · ZIP", v: "Pembroke Pines, FL 33024", pill: "verified", wide: true },
-    { k: "Coverage", v: "Original Medicare + PDP", pill: "high" },
-  ];
+  const [activeId, setActiveId] = useState("maria");
+  const [custom, setCustom] = useState(null); // a captured lead, replaces the catalog entry
+  const [showSwitch, setShowSwitch] = useState(false);
+  const [showCapture, setShowCapture] = useState(false);
+
+  const active = custom && custom.id === activeId ? custom : MOCK_LEADS[activeId];
+  const fields = active.fields;
+  const source = active.source;
+
+  const handleCommitCapture = (extracted) => {
+    const id = "captured_" + Date.now();
+    const newLead = {
+      id, source: "Captured · Claude Vision",
+      fields: Object.entries(extracted).map(([k, f], i) => ({
+        k, v: f.v || "—", pill: f.pill, wide: k === "Address · ZIP",
+      })),
+    };
+    setCustom(newLead);
+    setActiveId(id);
+    setShowCapture(false);
+  };
+
   return (
     <div style={{
       padding: "10px 12px",
       borderBottom: "1px solid rgba(255,255,255,0.06)",
       background: "linear-gradient(180deg, rgba(0,123,127,0.06), transparent)",
+      position: "relative",
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <User size={11} color={T.teal} />
         <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.7)" }}>Lead context</span>
-        <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.3)" }}>· Five9 screen-pop</span>
+        <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.3)" }}>· {source}</span>
         <span style={{
           display: "inline-flex", alignItems: "center", gap: 4,
           fontFamily: T.display, fontWeight: 600, fontSize: 9,
@@ -174,13 +448,13 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
           Ready
         </span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button data-no-drag="true" style={{
+          <button data-no-drag="true" onClick={() => setShowSwitch(true)} style={{
             fontFamily: T.display, fontWeight: 700, fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase",
             padding: "4px 8px", borderRadius: 6, cursor: "pointer",
             background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.55)",
             border: "1px solid rgba(255,255,255,0.08)",
           }}>Switch</button>
-          <button data-no-drag="true" style={{
+          <button data-no-drag="true" onClick={() => setShowCapture(true)} style={{
             fontFamily: T.display, fontWeight: 700, fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase",
             padding: "4px 8px", borderRadius: 6, cursor: "pointer",
             background: "linear-gradient(135deg, #007B7F, #004D50)", color: "#fff",
@@ -197,12 +471,26 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
           }}>
             <div style={{ fontFamily: T.display, fontWeight: 600, fontSize: 8, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)" }}>{f.k}</div>
             <div style={{ display: "flex", alignItems: "center", gap: 4, minHeight: 16 }}>
-              <span style={{ fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.9)", flex: 1, lineHeight: 1.35 }}>{f.v}</span>
+              <span style={{ fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.9)", flex: 1, lineHeight: 1.35 }}>{f.v || "—"}</span>
               <ConfidencePill level={f.pill} />
             </div>
           </div>
         ))}
       </div>
+
+      {showSwitch && (
+        <SwitchLeadModal
+          activeId={activeId}
+          onClose={() => setShowSwitch(false)}
+          onPick={(id) => { setActiveId(id); setShowSwitch(false); }}
+        />
+      )}
+      {showCapture && (
+        <CaptureLeadModal
+          onClose={() => setShowCapture(false)}
+          onCommit={handleCommitCapture}
+        />
+      )}
     </div>
   );
 }
