@@ -106,6 +106,271 @@ function AudioWave({ active, color = T.teal, bars = 5 }) {
   );
 }
 
+// ═══════════════════════════════════════
+//  NEW: Shared compliance + lead components
+// ═══════════════════════════════════════
+
+function ConfidencePill({ level }) {
+  const map = {
+    verified: { bg: "rgba(52,199,123,0.15)", bd: "rgba(52,199,123,0.3)", c: "#34C77B", label: "✓ verified" },
+    high:     { bg: "rgba(0,123,127,0.18)",  bd: "rgba(0,123,127,0.35)", c: "#1A9EA2", label: "high" },
+    medium:   { bg: "rgba(245,166,35,0.08)", bd: "rgba(245,166,35,0.35)", c: "#F5A623", label: "medium" },
+    low:      { bg: "rgba(231,76,60,0.08)",  bd: "rgba(231,76,60,0.4)",   c: "#ff8a7b", label: "low" },
+  };
+  const s = map[level] || map.high;
+  return (
+    <span style={{
+      fontFamily: T.mono, fontSize: 8, letterSpacing: "0.06em", textTransform: "uppercase",
+      padding: "1px 5px", borderRadius: 8, lineHeight: 1.3,
+      border: `1px solid ${s.bd}`, background: s.bg, color: s.c, whiteSpace: "nowrap",
+    }}>{s.label}</span>
+  );
+}
+
+function RecordingPill({ audioOn }) {
+  if (!audioOn) return null;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 5,
+      padding: "3px 8px", borderRadius: 999,
+      background: "rgba(231,76,60,0.1)", border: "1px solid rgba(231,76,60,0.3)",
+      fontFamily: T.display, fontWeight: 700, fontSize: 9, letterSpacing: "0.05em",
+      color: "#ff8a7b", textTransform: "uppercase",
+    }}>
+      <span style={{
+        width: 6, height: 6, borderRadius: "50%", background: "#E74C3C",
+        animation: "recPulse 1s infinite",
+      }} />
+      Recording
+      <style>{`@keyframes recPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }`}</style>
+    </span>
+  );
+}
+
+function LeadContextPanel({ scaledFont = (x) => x }) {
+  const fields = [
+    { k: "Name", v: "Maria Garcia", pill: "high" },
+    { k: "DOB", v: "Mar 15, 1952", pill: "verified" },
+    { k: "Phone", v: "(954) 555-0142", pill: "high" },
+    { k: "Address · ZIP", v: "Pembroke Pines, FL 33024", pill: "verified", wide: true },
+    { k: "Coverage", v: "Original Medicare + PDP", pill: "high" },
+  ];
+  return (
+    <div style={{
+      padding: "10px 12px",
+      borderBottom: "1px solid rgba(255,255,255,0.06)",
+      background: "linear-gradient(180deg, rgba(0,123,127,0.06), transparent)",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <User size={11} color={T.teal} />
+        <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.7)" }}>Lead context</span>
+        <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.3)" }}>· Five9 screen-pop</span>
+        <span style={{
+          display: "inline-flex", alignItems: "center", gap: 4,
+          fontFamily: T.display, fontWeight: 600, fontSize: 9,
+          color: "#34C77B", letterSpacing: "0.06em", textTransform: "uppercase", marginLeft: 6,
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#34C77B", boxShadow: "0 0 6px rgba(52,199,123,0.7)" }} />
+          Ready
+        </span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          <button data-no-drag="true" style={{
+            fontFamily: T.display, fontWeight: 700, fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase",
+            padding: "4px 8px", borderRadius: 6, cursor: "pointer",
+            background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.55)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}>Switch</button>
+          <button data-no-drag="true" style={{
+            fontFamily: T.display, fontWeight: 700, fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase",
+            padding: "4px 8px", borderRadius: 6, cursor: "pointer",
+            background: "linear-gradient(135deg, #007B7F, #004D50)", color: "#fff",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}>⊕ Capture Lead</button>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px 8px" }}>
+        {fields.map((f, i) => (
+          <div key={i} style={{
+            gridColumn: f.wide ? "span 2" : "span 1",
+            background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.04)",
+            borderRadius: 6, padding: "4px 7px",
+          }}>
+            <div style={{ fontFamily: T.display, fontWeight: 600, fontSize: 8, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)" }}>{f.k}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, minHeight: 16 }}>
+              <span style={{ fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.9)", flex: 1, lineHeight: 1.35 }}>{f.v}</span>
+              <ConfidencePill level={f.pill} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ComplianceHub({ peclItems, compact = false }) {
+  const peclDone = peclItems.filter(i => i.done).length;
+  const mspRow = peclItems.find(i => i.id === "msp");
+  const mspCovered = mspRow?.done;
+  // mark required vs recommended
+  const risk = {
+    tpmo: "req", lis: "req", msp: "req", medigap: "rec", soa: "req",
+  };
+  const riskLabel = { req: "required", rec: "rec" };
+  const dotColor = { req: "#E74C3C", rec: "#F5A623", done: "#34C77B" };
+  return (
+    <div style={{
+      padding: compact ? "8px 10px" : "10px 12px",
+      background: "linear-gradient(180deg, rgba(245,166,35,0.08), rgba(245,166,35,0.02))",
+      borderBottom: "1px solid rgba(245,166,35,0.2)",
+      position: "relative",
+    }}>
+      <div style={{ position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: "linear-gradient(180deg, #F5A623, rgba(245,166,35,0))" }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+        <AlertTriangle size={12} color="#F5A623" />
+        <span style={{ fontFamily: T.display, fontWeight: 800, fontSize: 10, letterSpacing: "0.12em", color: "#F5A623", textTransform: "uppercase" }}>Compliance Hub</span>
+        <span style={{ marginLeft: "auto", display: "flex", alignItems: "baseline", gap: 3, fontFamily: T.mono, fontWeight: 600, fontSize: 11, color: "rgba(255,255,255,0.85)" }}>
+          <span style={{ color: peclDone === peclItems.length ? "#34C77B" : "#F5A623" }}>{peclDone}</span>
+          <span style={{ fontSize: 9, color: "rgba(255,255,255,0.4)" }}>/ {peclItems.length}</span>
+        </span>
+      </div>
+      <div style={{ height: 5, borderRadius: 3, background: "rgba(255,255,255,0.06)", overflow: "hidden", marginBottom: 10 }}>
+        <div style={{
+          height: "100%", width: `${(peclDone / peclItems.length) * 100}%`,
+          background: "linear-gradient(90deg, #F5A623, #fbc76a)",
+          boxShadow: "0 0 10px rgba(245,166,35,0.4)",
+        }} />
+      </div>
+
+      {/* MSP dedicated card */}
+      <div style={{
+        background: mspCovered ? "rgba(0,123,127,0.1)" : "rgba(245,166,35,0.08)",
+        border: `1px solid ${mspCovered ? "rgba(0,123,127,0.4)" : "rgba(245,166,35,0.35)"}`,
+        borderRadius: 8, padding: "8px 10px", marginBottom: 10,
+        animation: mspCovered ? "none" : "mspPulse 2.2s infinite",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 3,
+            padding: "2px 6px", borderRadius: 4,
+            background: mspCovered ? "#34C77B" : "#F5A623",
+            color: mspCovered ? "#013014" : "#1a1200",
+            fontFamily: T.display, fontWeight: 800, fontSize: 8, letterSpacing: "0.08em", textTransform: "uppercase",
+          }}>{mspCovered ? "✓ Covered" : "⚠ Action Required"}</span>
+          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, color: mspCovered ? "#a9e7d1" : "#ffd699", letterSpacing: "0.01em" }}>
+            Medicare Savings Programs
+          </span>
+        </div>
+        <div style={{ fontFamily: T.body, fontSize: 11, color: "rgba(255,255,255,0.72)", lineHeight: 1.5, marginBottom: 7 }}>
+          {mspCovered
+            ? "MSP disclosure recorded. Safe to proceed with plan recommendations."
+            : "You must offer to screen for MSP eligibility before recommending any plan. Skipping may cause enrollment reversal."}
+        </div>
+        {!mspCovered && (
+          <div style={{ display: "flex", gap: 5 }}>
+            <button data-no-drag="true" style={{
+              fontFamily: T.display, fontWeight: 700, fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase",
+              padding: "5px 9px", borderRadius: 6, cursor: "pointer",
+              background: "linear-gradient(135deg, #007B7F, #004D50)", color: "#fff",
+              border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 2px 8px rgba(0,123,127,0.3)",
+            }}>⊕ Insert MSP script</button>
+            <button data-no-drag="true" style={{
+              fontFamily: T.display, fontWeight: 700, fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase",
+              padding: "5px 9px", borderRadius: 6, cursor: "pointer",
+              background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.6)",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}>Mark covered</button>
+          </div>
+        )}
+        <style>{`@keyframes mspPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(245,166,35,0.4); } 50% { box-shadow: 0 0 0 4px rgba(245,166,35,0); } }`}</style>
+      </div>
+
+      {/* PECL list */}
+      <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8, padding: "8px 10px" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginBottom: 6 }}>
+          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.85)" }}>
+            Pre-Enrollment Checklist
+          </span>
+          <span style={{ fontFamily: T.display, fontWeight: 500, fontSize: 9, color: "rgba(255,255,255,0.4)", letterSpacing: "0.04em" }}>(PECL)</span>
+          <span title="CMS Pre-Enrollment Checklist — items required before Medicare plan enrollment. Skipping items can result in enrollment reversal." style={{
+            width: 12, height: 12, borderRadius: "50%", background: "rgba(255,255,255,0.08)",
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.6)", cursor: "help",
+          }}>i</span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          {peclItems.map(item => {
+            const r = item.done ? "done" : risk[item.id] || "rec";
+            const isPending = !item.done && r === "req";
+            return (
+              <div key={item.id} style={{
+                display: "flex", alignItems: "center", gap: 7,
+                padding: "4px 7px", borderRadius: 5,
+                background: item.done ? "rgba(52,199,123,0.04)" : (isPending ? "rgba(231,76,60,0.05)" : "transparent"),
+                fontFamily: T.body, fontSize: 11,
+              }}>
+                <span style={{
+                  width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+                  background: dotColor[r],
+                  boxShadow: r === "req" ? "0 0 6px rgba(231,76,60,0.5)" : (r === "done" ? "0 0 6px rgba(52,199,123,0.5)" : "none"),
+                }} />
+                <span style={{
+                  flex: 1,
+                  color: item.done ? "rgba(255,255,255,0.55)" : (isPending ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.7)"),
+                  textDecoration: item.done ? "line-through" : "none",
+                  textDecorationColor: "rgba(52,199,123,0.4)",
+                }}>{item.label}</span>
+                <span style={{
+                  fontFamily: T.display, fontWeight: 700, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
+                  padding: "1px 4px", borderRadius: 3,
+                  background: item.done ? "rgba(52,199,123,0.12)" : (r === "req" ? "rgba(231,76,60,0.15)" : "rgba(245,166,35,0.12)"),
+                  color: item.done ? "#34C77B" : (r === "req" ? "#ff8a7b" : "#F5A623"),
+                }}>{item.done ? "done" : riskLabel[r] || "rec"}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MspInlineBadge({ covered }) {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 3,
+      padding: "1px 5px", borderRadius: 3, marginLeft: 4,
+      background: covered ? "#34C77B" : "#F5A623",
+      color: covered ? "#013014" : "#1a1200",
+      fontFamily: T.display, fontWeight: 800, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
+      cursor: "pointer",
+    }}>
+      <span style={{
+        width: 9, height: 9, borderRadius: "50%",
+        background: covered ? "#013014" : "#1a1200",
+        color: covered ? "#34C77B" : "#F5A623",
+        fontSize: 7, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800,
+      }}>{covered ? "✓" : "!"}</span>
+      {covered ? "MSP covered" : "MSP"}
+    </span>
+  );
+}
+
+function SourcesRow({ sources }) {
+  if (!sources || sources.length === 0) return null;
+  return (
+    <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+      {sources.map((s, i) => (
+        <span key={i} style={{
+          fontFamily: T.mono, fontSize: 8, letterSpacing: "0.04em", textTransform: "uppercase",
+          padding: "1px 5px", borderRadius: 6,
+          background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.45)",
+          border: "1px solid rgba(255,255,255,0.08)",
+        }}>{s}</span>
+      ))}
+    </div>
+  );
+}
+
 // ─── Simulated live transcript lines ───
 const transcriptLines = [
   { speaker: "agent", text: "Good afternoon Mrs. Garcia, this is James with Trifecta Benefits. I'm required to let you know that I'm a licensed agent with a third-party marketing organization.", time: "2:01" },
@@ -288,8 +553,11 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn }) {
         {resp.plans && <div style={{ marginTop: 8 }}>
           {resp.plans.map((p, j) => (
             <div key={j} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 8px", marginBottom: 3, background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.03)" }}>
-              <div>
-                <div style={{ fontFamily: T.display, fontSize: scaledFont(11), fontWeight: 600, color: T.white }}>{p.name}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <div style={{ fontFamily: T.display, fontSize: scaledFont(11), fontWeight: 600, color: T.white }}>{p.name}</div>
+                  <MspInlineBadge covered={p.mspCovered !== false} />
+                </div>
                 <div style={{ fontFamily: T.mono, fontSize: scaledFont(9), color: "rgba(255,255,255,0.3)" }}>{p.tier} · PA: {p.pa} · {p.stars}</div>
               </div>
               <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: scaledFont(13), color: "#34C77B" }}>{p.copay}</span>
@@ -395,20 +663,15 @@ function MobileLayout() {
           </button>
         ))}
       </div>
-      <div style={{ marginTop: 20, padding: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10 }}>
-        <div style={{ fontFamily: T.display, fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 10 }}>PECL Checklist</div>
-        {peclItems.map(item => (
-          <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
-            {item.done ? <CheckCircle size={14} color={T.teal} /> : <Circle size={14} color="rgba(255,255,255,0.15)" />}
-            <span style={{ fontFamily: T.body, fontSize: 13, color: item.done ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.25)" }}>{item.label}</span>
-          </div>
-        ))}
+      <div style={{ marginTop: 16 }}>
+        <ComplianceHub peclItems={peclItems} />
       </div>
     </div>
   );
 
   const renderCopilot = () => (
     <div style={{ padding: 16 }}>
+      <LeadContextPanel />
       {aiResponses.slice(0, shownResponses).map((resp, i) => (
         <AIResponseCard key={i} resp={resp} scaledFont={scaledFont} opacity={opacity} audioOn={audioOn} screenOn={screenOn} />
       ))}
@@ -753,15 +1016,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           </button>
         ))}
       </div>
-      <div style={{ padding: 10, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 8 }}>
-        <div style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>PECL Checklist</div>
-        {peclItems.map(item => (
-          <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0" }}>
-            {item.done ? <CheckCircle size={11} color={T.teal} /> : <Circle size={11} color="rgba(255,255,255,0.15)" />}
-            <span style={{ fontFamily: T.body, fontSize: 11, color: item.done ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.25)" }}>{item.label}</span>
-          </div>
-        ))}
-      </div>
+      <ComplianceHub peclItems={peclItems} compact />
     </div>
   );
 
@@ -789,8 +1044,16 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
   const renderDesktopCopilot = () => {
     const resp = aiResponses[shownResponses - 1];
+    const sourcesByTrigger = {
+      "what plans would cover my Eliquis": ["ZIP 33024", "Rx: Eliquis", "Coverage: Original Medicare"],
+      "Dr. Patel at Baptist Health": ["PCP: Dr. Patel", "Plan: Humana S5884-065"],
+      "what about dental": ["ZIP 33024", "Coverage gap: dental"],
+    };
+    const sources = sourcesByTrigger[resp.trigger];
     return (
-      <div style={{ padding: "6px 14px" }}>
+      <div>
+        <LeadContextPanel scaledFont={scaledFont} />
+        <div style={{ padding: "8px 14px" }}>
         {/* Detected trigger + source chips */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(0,123,127,0.1)", border: "1px solid rgba(0,123,127,0.2)", borderRadius: 20 }}>
@@ -842,12 +1105,16 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           </div>
         )}
 
+        {/* Sources row */}
+        <SourcesRow sources={sources} />
+
         {/* Response counter */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>{shownResponses} / {aiResponses.length} responses</span>
           {shownResponses < aiResponses.length && (
             <span style={{ fontFamily: T.display, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>· click Ask AI for next</span>
           )}
+        </div>
         </div>
       </div>
     );
