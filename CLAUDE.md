@@ -1,0 +1,163 @@
+# CLAUDE.md — MediCopilot
+
+Durable project context for any Claude Code session (human or AI) picking up work on this repo.
+
+## What this is
+
+MediCopilot is a real-time AI copilot for Medicare insurance agents on live sales calls. Think Cluely, but vertical — baked-in Medicare compliance (PECL / MSP / TPMO / SOA), plan/drug/provider intelligence, and AI suggestions surfaced in a floating overlay above Five9 or whatever dialer the agent runs. Web-first; macOS-native wrapper comes later.
+
+Authoritative reference documents:
+
+- **[plans/PRD.md](plans/PRD.md)** — the product requirements doc. Read this first. It defines phases P0→P5, scope, data models, compliance, architecture, decisions with rationale, open questions, and risks. Current version: v0.5 (2026-04-15).
+- **[plans/ui-final-spec.md](plans/ui-final-spec.md)** — frozen UI/UX spec. Authoritative for visual behavior. Do not change UI patterns without updating this first.
+- **[plans/ui-mockup.html](plans/ui-mockup.html)** + **[plans/ui-integrated-mockup.html](plans/ui-integrated-mockup.html)** — static HTML reference renderings.
+
+If you read CLAUDE.md + PRD + ui-final-spec.md (in that order), you should be productive in under 5 minutes.
+
+## Current phase
+
+**P0 Foundations.** Foundational scaffolding — repo hygiene, env templates, data extraction from the monolith, v1-demo snapshot preservation. No real integrations yet; the current deploy is still the interactive mockup at [medicopilot.vercel.app](https://medicopilot.vercel.app).
+
+The frozen v1 snapshot is tagged `v1-demo` and served independently from the primary deploy. Do not remove that tag.
+
+## Stack
+
+| Layer | Tech | Why |
+|---|---|---|
+| **Frontend** | React 19, Vite 8, lucide-react | Existing; keep stable through P5 |
+| **Styling** | Inline style objects + CSS-in-JS per spec | Existing; don't introduce Tailwind or CSS modules without a reason |
+| **Types** | JSDoc at P0–P1; TypeScript at P2 | Incremental migration documented in PRD OQ #9 |
+| **Hosting (web)** | Vercel (primary + preview deploys) | Static CDN + edge fns for OCR |
+| **Edge functions** | Vercel Edge (Node runtime for vision, Edge runtime for text) | Short-lived, cold-start-tolerant |
+| **Backend (P2)** | Fastify on Fly.io `iad` | Long-lived WebSocket — edge can't hold WS for call duration |
+| **Database** | Neon Postgres (from MVP) | Serverless, RLS-ready, branching for preview deploys |
+| **Cache / sessions** | Upstash Redis | Transcript window, OTP rate-limits, WSS session state |
+| **STT** | Deepgram Nova-3 streaming + diarization | Best streaming accuracy in category |
+| **LLM** | Claude Sonnet 4.6 (suggestions + vision), Haiku 4.5 (classification) | Anthropic is the primary vendor |
+| **Auth (MVP)** | Twilio Verify SMS-OTP + self-issued JWT (open signup) | Phone-only, no passwords, no allowlist |
+| **Auth (P5)** | Clerk Organizations | Multi-tenant at P5 |
+| **Telephony (P3)** | Twilio + Retell AI | Demo DID |
+| **Native (P4)** | Tauri 2.x | Floating overlay, global hotkey, ScreenCaptureKit, Core Audio Taps |
+| **Observability** | Sentry (errors) + Axiom (logs) | HIPAA-capable, cheap |
+| **Product telemetry** | PostHog self-hosted | No PHI; BAA path at P5 |
+| **Billing (P5)** | Stripe | Subscriptions via Stripe MCP tools |
+
+## Accounts / environment
+
+All secrets live in environment variables — **never in the client bundle**. See [`.env.example`](.env.example) for the canonical list.
+
+- Vercel project: `medicopilot` (primary)
+- Vercel project: `medicopilot-v1` (pins to git tag `v1-demo`, preserves the frozen mockup)
+- Production URL: `medicopilot.vercel.app`
+
+## Branch conventions
+
+- `main` — production-deployed
+- `claude/<description>-<id>` — feature branches for AI-cowork sessions (current: `claude/medicopilot-launch-planning-6Rmg5`)
+- Pull requests must pass lint + typecheck + tests before merge to `main`
+- Never push to `main` directly
+
+## Directory layout
+
+```
+.
+├── CLAUDE.md                     — this file
+├── README.md                     — entry point, points here + to PRD
+├── .env.example                  — full env-var template (P0→P5)
+├── vercel.json                   — Vercel config
+├── plans/
+│   ├── PRD.md                    — product requirements (authoritative)
+│   ├── ui-final-spec.md          — UI spec (frozen)
+│   ├── ui-mockup.html            — static HTML references
+│   └── ui-integrated-mockup.html
+├── src/
+│   ├── App.jsx                   — entry
+│   ├── main.jsx
+│   ├── index.css
+│   ├── MediCopilot_macOS_Mockup.jsx  — monolith (being broken up through P0→P2)
+│   └── data/                     — extracted mock data modules (P0)
+│       ├── leads.js              — MOCK_LEADS + RECENT_LEADS
+│       ├── transcript.js         — simulated transcript lines
+│       ├── aiResponses.js        — AI response cards
+│       ├── pecl.js               — PECL items (initial state)
+│       ├── plans/                — mock plan data (seed for Plan Provider)
+│       │   ├── index.js
+│       │   └── seed.json
+│       └── compliance/
+│           └── states.js         — two-party-consent state list
+├── api/                          — Vercel Edge Functions (P1+)
+│   ├── extract-lead.ts           — vision OCR (P1)
+│   ├── extract-lead-text.ts      — paste-parse (P1)
+│   └── auth/                     — SMS-OTP endpoints (P2)
+├── server/                       — Fastify app (P2+)
+└── src-tauri/                    — Tauri wrapper (P4)
+```
+
+## Domain glossary
+
+Medicare sales is acronym-dense. Stubs for common terms — full list in [PRD § Glossary](plans/PRD.md#glossary).
+
+- **AEP** — Annual Enrollment Period (Oct 15 – Dec 7). Medicare's Black Friday.
+- **MAPD** — Medicare Advantage + Prescription Drug plan (Part C + D combined).
+- **PDP** — Part D standalone prescription drug plan.
+- **MA** — Medicare Advantage (Part C).
+- **OM** — Original Medicare (Parts A + B).
+- **PECL** — Pre-Enrollment Checklist. CMS-required script items agents must cover.
+- **MSP** — Medicare Savings Programs. State programs for Part B premium help.
+- **LIS** — Low-Income Subsidy / Extra Help. Part D cost assistance.
+- **SOA** — Scope of Appointment. CMS-required form.
+- **TPMO** — Third-Party Marketing Organization disclosure. Required up front.
+- **NPN** — National Producer Number. Agent license ID.
+- **Five9** — Cloud dialer our primary customers use.
+- **MARx** — CMS enrollment system. No public API — not a data source. Enrollment submission is out of scope for this product.
+
+## Code conventions
+
+Inferred from existing code — keep consistent unless PRD calls for a change.
+
+1. **JSDoc typedefs**, not TypeScript, through P0–P1. `LeadContext`, `FieldValue`, `AIResponse`, `PECLState` shapes are defined in [PRD § Data models](plans/PRD.md#data-models-canonical). Pull those into `@typedef` comments as you go.
+2. **Inline-style objects** for visual components — the existing UI uses this pattern consistently; stick with it.
+3. **Hook-first** — functional components + hooks; no class components.
+4. **Named exports** from `src/data/*` modules; default export reserved for page-level components.
+5. **Environment access** — always `import.meta.env.VITE_*` for client-visible vars; server-only secrets never get the `VITE_` prefix.
+6. **No `console.log` in shipped code** — use the logger (Axiom at P2). Replace `console.*` with `TODO` comments referencing the logger before PR merge.
+
+## PII & compliance rules (read before writing code that touches lead data)
+
+- **Redact SSN, credit-card, and raw phone numbers** in any string that crosses a network boundary. Use the redactor in `src/utils/redact.ts` (P2 addition).
+- **First name, DOB, and medication names** are permitted in the Claude suggestion prompt under Anthropic's BAA (active from P5). See PRD OQ #12.
+- **Never log PII** to Axiom, Sentry, or PostHog. Telemetry is anonymous only.
+- **Two-party consent states** are in `src/data/compliance/states.js` — consent-banner copy branches on the lead's state.
+
+## How to pick up a new session
+
+1. Read **PRD.md** end-to-end. ~15 min. Decisions already made are in the Open Questions table.
+2. Skim **ui-final-spec.md**. ~5 min. Only read end-to-end if doing UI work.
+3. Check the PR / branch you're continuing. `git log --oneline -20` + `git status`.
+4. Run `npm install` if needed; `npm run dev` to boot the mockup at `localhost:5173`.
+5. Any decision you make that's not already in the PRD — add it to the PRD OQ table before you ship, so the next session doesn't re-derive.
+
+## Scripts
+
+```
+npm run dev       # Vite dev server on :5173
+npm run build     # production build to dist/
+npm run preview   # preview the prod build locally
+npm run lint      # ESLint
+```
+
+Planned scripts (per phase):
+- `npm run test` (Vitest, P0)
+- `npm run typecheck` (P0 — JSDoc first, full TS at P2)
+- `npm run server:dev` (Fastify, P2)
+- `npm run tauri:dev` (P4)
+
+## Current contributors
+
+- Shawn (myacaexpress) — product, domain, decisions
+- Claude Code sessions — execution, planning, documentation
+
+## Reporting issues / feedback
+
+- Product or architectural decisions: discuss with Shawn, then update the PRD
+- Claude Code tooling feedback: [github.com/anthropics/claude-code/issues](https://github.com/anthropics/claude-code/issues)

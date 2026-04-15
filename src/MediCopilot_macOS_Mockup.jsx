@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Heart, Coins, Sprout, Shield, CheckCircle, Circle, AlertTriangle, Send, ChevronRight, Eye, EyeOff, Maximize2, Minimize2, Phone, User, Bot, Mic, MicOff, Monitor, GripVertical, Zap, Volume2, GripHorizontal, Menu, X, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  MOCK_LEADS,
+  RECENT_LEADS,
+  transcriptLines,
+  aiResponses,
+  DEFAULT_PECL_ITEMS,
+} from "./data/index.js";
 
 const T = {
   teal: "#007B7F", tealDark: "#004D50", tealLight: "#1A9EA2",
@@ -147,44 +154,7 @@ function RecordingPill({ audioOn }) {
   );
 }
 
-const MOCK_LEADS = {
-  maria: {
-    id: "maria", source: "Five9 screen-pop",
-    fields: [
-      { k: "Name", v: "Maria Garcia", pill: "high" },
-      { k: "DOB", v: "Mar 15, 1952", pill: "verified" },
-      { k: "Phone", v: "(954) 555-0142", pill: "high" },
-      { k: "Address · ZIP", v: "Pembroke Pines, FL 33024", pill: "verified", wide: true },
-      { k: "Coverage", v: "Original Medicare + PDP", pill: "high" },
-    ],
-  },
-  roberto: {
-    id: "roberto", source: "CRM · Spouse record",
-    fields: [
-      { k: "Name", v: "Roberto Garcia", pill: "verified" },
-      { k: "DOB", v: "Aug 02, 1950", pill: "verified" },
-      { k: "Phone", v: "(954) 555-0142", pill: "medium" },
-      { k: "Address · ZIP", v: "Pembroke Pines, FL 33024", pill: "verified", wide: true },
-      { k: "Coverage", v: "MA-PD (Humana H1036-206)", pill: "verified" },
-    ],
-  },
-  linda: {
-    id: "linda", source: "CRM · Prior callback",
-    fields: [
-      { k: "Name", v: "Linda Nguyen", pill: "verified" },
-      { k: "DOB", v: "Nov 22, 1948", pill: "verified" },
-      { k: "Phone", v: "(305) 555-0188", pill: "high" },
-      { k: "Address · ZIP", v: "Miami, FL 33176", pill: "verified", wide: true },
-      { k: "Coverage", v: "Turning 65 · no coverage yet", pill: "medium" },
-    ],
-  },
-};
-
-const RECENT_LEADS = [
-  { id: "maria", name: "Maria Garcia", sub: "(954) 555-0142 · 33024 · Original+PDP", tag: "Active · Five9" },
-  { id: "roberto", name: "Roberto Garcia", sub: "(954) 555-0142 · 33024 · MA-PD Humana", tag: "Spouse on line" },
-  { id: "linda", name: "Linda Nguyen", sub: "(305) 555-0188 · 33176 · T65, no coverage", tag: "Callback · 3d ago" },
-];
+// MOCK_LEADS + RECENT_LEADS now live in src/data/leads.js (P0 extraction)
 
 function SwitchLeadModal({ activeId, onPick, onClose }) {
   const [q, setQ] = useState("");
@@ -782,82 +752,9 @@ function SourcesRow({ sources }) {
   );
 }
 
-// ─── Simulated live transcript lines ───
-const transcriptLines = [
-  { speaker: "agent", text: "Good afternoon Mrs. Garcia, this is James with Trifecta Benefits. I'm required to let you know that I'm a licensed agent with a third-party marketing organization.", time: "2:01" },
-  { speaker: "client", text: "Okay, that's fine.", time: "2:01" },
-  { speaker: "agent", text: "Perfect. I see you're currently on Original Medicare with a standalone prescription drug plan. How has that been working for you?", time: "2:02" },
-  { speaker: "client", text: "It's okay but my drug costs keep going up. I'm paying a lot for my Eliquis.", time: "2:03" },
-  { speaker: "agent", text: "I understand. Let me look into that for you.", time: "2:03" },
-  { speaker: "client", text: "Can you tell me what plans would cover my Eliquis? I'm in Pembroke Pines.", time: "2:03", isQuestion: true },
-  { speaker: "agent", text: "Absolutely. Let me pull up plans in your area that cover Eliquis...", time: "2:04" },
-  { speaker: "client", text: "Also, I really need to make sure Dr. Patel at Baptist Health is in the network. He's been my doctor for years.", time: "2:05", isQuestion: true },
-  { speaker: "client", text: "And what about dental? My teeth have been bothering me and Original Medicare doesn't cover dental at all.", time: "2:06", isQuestion: true },
-];
+// transcriptLines now lives in src/data/transcript.js (P0 extraction)
 
-// ─── AI Responses keyed to detected questions ───
-const aiResponses = [
-  {
-    trigger: "what plans would cover my Eliquis",
-    context: { screen: "Five9: Maria Garcia, ZIP 33024, Original Medicare + PDP", audio: "Client asking about Eliquis coverage in Pembroke Pines" },
-    // legacy mobile fields
-    response: "3 plans cover Eliquis in ZIP 33024:",
-    plans: [
-      { name: "Humana Preferred Rx Plan", copay: "$47/mo", tier: "T3", pa: "No", stars: "★★★★" },
-      { name: "Aetna CVS Health Rx Saver", copay: "$42/mo", tier: "T3", pa: "No", stars: "★★★½" },
-      { name: "WellCare Value Script", copay: "$89/mo", tier: "T4", pa: "Yes", stars: "★★★" },
-    ],
-    compliance: "Present all options. Do not describe any plan as \"the best\" — let Mrs. Garcia decide based on her needs.",
-    // desktop Cluely-style fields
-    sayThis: "Mrs. Garcia, I've pulled up Medicare prescription plans in the 33024 ZIP that cover Eliquis. The strongest option right now is the Humana Preferred Rx Plan — Eliquis is on Tier 3 at $47 a month, no prior authorization required, and it's rated 4 stars. I can walk you through two other options as well so you can compare.",
-    pressMore: [
-      "Aetna CVS Health Rx Saver also covers Eliquis at Tier 3 — $42 a month, no prior auth required. A bit lower monthly cost.",
-      "WellCare Value Script covers it at Tier 4 for $89 a month — prior authorization is required, so a bit more friction when filling.",
-    ],
-    followUps: [
-      "Which monthly copay range works best for your budget?",
-      "Are there other prescriptions you'd like me to check coverage on while I have you?",
-    ],
-  },
-  {
-    trigger: "Dr. Patel at Baptist Health",
-    context: { screen: "Five9: Maria Garcia, Humana S5884-065 under discussion", audio: "Client asking about provider network — Dr. Patel, Baptist Health" },
-    // legacy mobile fields
-    response: "✅ Dr. Raj Patel, MD — Baptist Health South Florida",
-    detail: "In-Network confirmed for Humana Preferred Rx Plan (S5884-065). Internal Medicine.",
-    compliance: "Before enrollment: you still need to cover Medicare Savings Programs (PECL requirement).",
-    script: "\"Mrs. Garcia, I'm required to mention Medicare Savings Programs — state programs that can help with your Part B premium. Would you like me to check if you might qualify?\"",
-    // desktop Cluely-style fields
-    sayThis: "Good news — Dr. Raj Patel at Baptist Health South Florida is in-network for the Humana Preferred Rx Plan we've been discussing. He's listed under Internal Medicine, so your primary care relationship stays intact. Before we go further, I do need to mention a couple of Medicare Savings Programs as part of my required disclosures.",
-    pressMore: [
-      "Medicare Savings Programs are state-run programs that can help cover your Part B premium — eligibility is based on income and assets.",
-      "This is a PECL compliance requirement, so I want to make sure we cover it properly before moving to enrollment.",
-    ],
-    followUps: [
-      "Would you like me to check if you might qualify for a Medicare Savings Program?",
-      "Any other providers or specialists you'd like me to verify before we finalize?",
-    ],
-  },
-  {
-    trigger: "what about dental",
-    context: { screen: "Five9: Maria Garcia, discussing MAPD plans", audio: "Client asking about dental coverage — current Medicare doesn't cover" },
-    // legacy mobile fields
-    response: "Great question. Several MAPD plans in 33024 include dental benefits:",
-    detail: "Humana Gold Plus (H1036-200) includes preventive and comprehensive dental. Aetna Medicare Eagle (H3312-067) includes preventive dental with $2,000 annual max.",
-    trifecta: "This is the ancillary conversation — a natural bridge to the trifecta. If she needs dental + vision + hearing, an ancillary package alongside her MAPD strengthens retention.",
-    compliance: "Only present dental benefits that are part of the MA plan or a separate ancillary product you're appointed to sell.",
-    // desktop Cluely-style fields
-    sayThis: "You're right that Original Medicare doesn't cover dental — but several Medicare Advantage plans in your ZIP do. The Humana Gold Plus plan includes both preventive and comprehensive dental care. The Aetna Medicare Eagle covers preventive dental with a $2,000 annual maximum. If you're thinking about major work like crowns or extractions, the Humana plan would give you more coverage.",
-    pressMore: [
-      "If dental is a real priority, we can also look at pairing a Medicare Advantage plan with a standalone ancillary dental policy — that can significantly raise your annual maximum.",
-      "Some plans bundle dental with vision and hearing coverage, which tends to be a strong value for clients in this age range.",
-    ],
-    followUps: [
-      "Have you had any major dental work planned recently — crowns, implants, or anything like that?",
-      "Would you like me to put a couple of MAPD plans with dental side by side so you can compare the benefits?",
-    ],
-  },
-];
+// aiResponses now lives in src/data/aiResponses.js (P0 extraction)
 
 // ═══════════════════════════════════════
 //  DESKTOP COMPONENTS (unchanged logic)
@@ -1016,13 +913,7 @@ function MobileLayout() {
     return () => clearInterval(iv);
   }, []);
 
-  const peclItems = [
-    { id: "tpmo", label: "TPMO Disclaimer", done: true },
-    { id: "lis", label: "Low-Income Subsidy", done: true },
-    { id: "msp", label: "Medicare Savings", done: false },
-    { id: "medigap", label: "Medigap Rights", done: false },
-    { id: "soa", label: "Scope of Appointment", done: true },
-  ];
+  const peclItems = DEFAULT_PECL_ITEMS;
   const peclDone = peclItems.filter(i => i.done).length;
 
   const handleAskAI = () => {
@@ -1373,13 +1264,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
   }, []);
 
-  const peclItems = [
-    { id: "tpmo", label: "TPMO Disclaimer", done: true },
-    { id: "lis", label: "Low-Income Subsidy", done: true },
-    { id: "msp", label: "Medicare Savings", done: false },
-    { id: "medigap", label: "Medigap Rights", done: false },
-    { id: "soa", label: "Scope of Appointment", done: true },
-  ];
+  const peclItems = DEFAULT_PECL_ITEMS;
   const peclDone = peclItems.filter(i => i.done).length;
   const clearBg = (a) => `rgba(0, 40, 42, ${a})`;
   const clearBorder = (a) => `1px solid rgba(0, 123, 127, ${a})`;
