@@ -102,6 +102,15 @@ function useResizable(iw, ih, minW = 320, minH = 400) {
   return { size, onResizeStart };
 }
 
+// "MM:SS" from a millisecond duration. Used by the call-state header.
+function formatElapsed(ms) {
+  if (!ms || ms < 0) return "00:00";
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 // ─── Audio waveform animation ───
 // When `analyser` (an AnalyserNode) is provided, bar heights are driven by
 // real-time frequency data via requestAnimationFrame. Otherwise the bars
@@ -1371,7 +1380,28 @@ function MacDock() {
   );
 }
 
-function Five9Window({ callEnded = false, onEndCall }) {
+function Five9Window({ callState = "idle", onStartCall, onEndCall }) {
+  const isActive = callState === "active";
+  const isEnded = callState === "ended";
+  const statusLabel = isActive ? "CONNECTED" : isEnded ? "CALL ENDED" : "READY";
+  const statusColor = isActive ? "#34C77B" : isEnded ? "#ff8a7b" : "rgba(255,255,255,0.45)";
+  const statusDot = isActive ? "#34C77B" : isEnded ? "#E74C3C" : "rgba(255,255,255,0.35)";
+  const statusGlow = isActive
+    ? "0 0 8px rgba(52,199,123,0.5)"
+    : isEnded
+      ? "0 0 8px rgba(231,76,60,0.5)"
+      : "none";
+  const titleLabel = isActive ? "Active Call" : isEnded ? "Call Ended" : "Ready";
+
+  // The "primary" action button swaps based on call state. When idle or
+  // ended the slot becomes a green Start Call button (so the agent can
+  // explicitly begin transcription); when active it's a red End Call.
+  const primary = isActive
+    ? { label: "End Call", icon: "📕", onClick: onEndCall, bg: "rgba(231,76,60,0.3)", color: "#ff8a7b" }
+    : { label: isEnded ? "Start New Call" : "Start Call", icon: "📞", onClick: onStartCall, bg: "rgba(52,199,123,0.25)", color: "#7be0a8" };
+
+  const dimmed = !isActive;
+
   return (
     <div style={{ position: "absolute", top: 50, left: 40, width: 680, borderRadius: 8, background: "#1a1a2e", boxShadow: "0 20px 60px rgba(0,0,0,0.4)", overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", height: 28, padding: "0 10px", background: "#2D2D2D", borderBottom: "1px solid #3a3a3a", borderRadius: "8px 8px 0 0" }}>
@@ -1380,13 +1410,13 @@ function Five9Window({ callEnded = false, onEndCall }) {
           <div style={{ width: 12, height: 12, borderRadius: 6, background: "#FFBD2E" }} />
           <div style={{ width: 12, height: 12, borderRadius: 6, background: "#28C840" }} />
         </div>
-        <div style={{ flex: 1, textAlign: "center", fontSize: 12, fontWeight: 500, color: "#aaa", fontFamily: "-apple-system, sans-serif" }}>Five9 Agent Desktop — {callEnded ? "Call Ended" : "Active Call"}</div>
+        <div style={{ flex: 1, textAlign: "center", fontSize: 12, fontWeight: 500, color: "#aaa", fontFamily: "-apple-system, sans-serif" }}>Five9 Agent Desktop — {titleLabel}</div>
       </div>
       <div style={{ padding: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-          <div style={{ width: 10, height: 10, borderRadius: 5, background: callEnded ? "#E74C3C" : "#34C77B", boxShadow: callEnded ? "0 0 8px rgba(231,76,60,0.5)" : "0 0 8px rgba(52,199,123,0.5)" }} />
-          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16, color: callEnded ? "#ff8a7b" : "#34C77B" }}>{callEnded ? "CALL ENDED" : "CONNECTED"}</span>
-          <span style={{ fontFamily: T.mono, fontSize: 14, color: T.dusk }}>08:12</span>
+          <div style={{ width: 10, height: 10, borderRadius: 5, background: statusDot, boxShadow: statusGlow }} />
+          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16, color: statusColor }}>{statusLabel}</span>
+          <span style={{ fontFamily: T.mono, fontSize: 14, color: T.dusk }}>{isActive ? "08:12" : "00:00"}</span>
           <span style={{ fontFamily: T.mono, fontSize: 13, color: "#666", marginLeft: "auto" }}>Campaign: AEP_MAPD_FL</span>
         </div>
         <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 16, marginBottom: 16 }}>
@@ -1400,23 +1430,36 @@ function Five9Window({ callEnded = false, onEndCall }) {
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-          {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"],["End Call","📕"]].map(([l,ic]) => (
+          {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"]].map(([l,ic]) => (
             <button
               key={l}
-              onClick={l === "End Call" ? onEndCall : undefined}
-              disabled={l === "End Call" && callEnded}
+              disabled={dimmed}
               style={{
-                background: l === "End Call" ? (callEnded ? "rgba(231,76,60,0.12)" : "rgba(231,76,60,0.3)") : "rgba(255,255,255,0.1)",
+                background: "rgba(255,255,255,0.1)",
                 border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "10px 16px",
-                cursor: l === "End Call" && callEnded ? "default" : "pointer",
-                opacity: l === "End Call" && callEnded ? 0.55 : 1,
+                cursor: dimmed ? "default" : "pointer",
+                opacity: dimmed ? 0.45 : 1,
                 display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
               }}
             >
               <span style={{ fontSize: 18 }}>{ic}</span>
-              <span style={{ fontFamily: T.display, fontSize: 10, color: "#999" }}>{l === "End Call" && callEnded ? "Ended" : l}</span>
+              <span style={{ fontFamily: T.display, fontSize: 10, color: "#999" }}>{l}</span>
             </button>
           ))}
+          <button
+            onClick={primary.onClick}
+            style={{
+              background: primary.bg,
+              border: `1px solid ${isActive ? "rgba(231,76,60,0.45)" : "rgba(52,199,123,0.45)"}`,
+              borderRadius: 8, padding: "10px 20px", cursor: "pointer",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+              animation: !isActive ? "fivePulse 2s ease-in-out infinite" : "none",
+            }}
+          >
+            <span style={{ fontSize: 18 }}>{primary.icon}</span>
+            <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 700, color: primary.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{primary.label}</span>
+          </button>
+          <style>{`@keyframes fivePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,199,123,0.45); } 50% { box-shadow: 0 0 0 6px rgba(52,199,123,0); } }`}</style>
         </div>
       </div>
     </div>
@@ -1511,7 +1554,6 @@ function MobileLayout() {
   const [inputVal, setInputVal] = useState("");
   const [audioOn, setAudioOn] = useState(true);
   const [screenOn, setScreenOn] = useState(true);
-  const [callEnded, setCallEnded] = useState(false);
   const [visibleTranscript, setVisibleTranscript] = useState(6);
   const [shownResponses, setShownResponses] = useState(1);
   const [tick, setTick] = useState(0);
@@ -1524,13 +1566,18 @@ function MobileLayout() {
   const opacity = 0.88;
   const scaledFont = (base) => base;
 
+  // Call lifecycle from LeadContext. The audio pipeline only runs while
+  // call.state === "active" (the agent has clicked Start Call).
+  const { lead: ctxLead, call } = useLead();
+  const callActive = call.state === "active";
+  const callEnded = call.state === "ended";
+
   // Live audio pipeline. When VITE_BACKEND_WSS_URL isn't set the hook is a
   // no-op and `transcripts` stays empty — renderers fall back to the demo.
-  // Ending the call forces enabled→false, which triggers the useLiveAudio
-  // cleanup (closes WSS intentionally + releases the mic track).
-  const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn && !callEnded });
+  // call.state !== "active" forces enabled→false, which triggers the
+  // useLiveAudio cleanup (closes WSS intentionally + releases the mic).
+  const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn && callActive });
   useAudioErrorToasts(liveAudio);
-  const { lead: ctxLead } = useLead();
   useLeadContextPush(liveAudio, ctxLead);
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
@@ -1584,13 +1631,13 @@ function MobileLayout() {
   }, [liveAudio.autoPecl]);
 
   const handleEndCall = useCallback(() => {
-    setCallEnded(true);
+    call.end();
     setAudioOn(false);
-  }, []);
-  const handleResumeCall = useCallback(() => {
-    setCallEnded(false);
+  }, [call]);
+  const handleStartCall = useCallback(() => {
     setAudioOn(true);
-  }, []);
+    call.start();
+  }, [call]);
 
   const handleAskAI = () => {
     if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
@@ -1629,18 +1676,39 @@ function MobileLayout() {
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-        {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"],["End Call","📕"]].map(([l,ic]) => (
-          <button key={l} onClick={l === "End Call" ? handleEndCall : undefined} disabled={l === "End Call" && callEnded} style={{
-            background: l==="End Call" ? (callEnded ? "rgba(231,76,60,0.12)" : "rgba(231,76,60,0.3)") : "rgba(255,255,255,0.08)",
+        {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"]].map(([l,ic]) => (
+          <button key={l} disabled={!callActive} style={{
+            background: "rgba(255,255,255,0.08)",
             border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10,
-            padding: "12px 8px", cursor: l === "End Call" && callEnded ? "default" : "pointer",
-            opacity: l === "End Call" && callEnded ? 0.55 : 1,
+            padding: "12px 8px", cursor: callActive ? "pointer" : "default",
+            opacity: callActive ? 1 : 0.5,
             display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
           }}>
             <span style={{ fontSize: 22 }}>{ic}</span>
-            <span style={{ fontFamily: T.display, fontSize: 11, color: "#999" }}>{l === "End Call" && callEnded ? "Ended" : l}</span>
+            <span style={{ fontFamily: T.display, fontSize: 11, color: "#999" }}>{l}</span>
           </button>
         ))}
+        {callActive ? (
+          <button onClick={handleEndCall} style={{
+            background: "rgba(231,76,60,0.3)", border: "1px solid rgba(231,76,60,0.45)", borderRadius: 10,
+            padding: "12px 8px", cursor: "pointer",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+          }}>
+            <span style={{ fontSize: 22 }}>📕</span>
+            <span style={{ fontFamily: T.display, fontSize: 11, color: "#ff8a7b", fontWeight: 700 }}>End Call</span>
+          </button>
+        ) : (
+          <button onClick={handleStartCall} style={{
+            background: "rgba(52,199,123,0.25)", border: "1px solid rgba(52,199,123,0.45)", borderRadius: 10,
+            padding: "12px 8px", cursor: "pointer",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+            animation: "fivePulse 2s ease-in-out infinite",
+          }}>
+            <span style={{ fontSize: 22 }}>📞</span>
+            <span style={{ fontFamily: T.display, fontSize: 11, color: "#7be0a8", fontWeight: 700 }}>{callEnded ? "Start New" : "Start Call"}</span>
+          </button>
+        )}
+        <style>{`@keyframes fivePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,199,123,0.45); } 50% { box-shadow: 0 0 0 6px rgba(52,199,123,0); } }`}</style>
       </div>
       <div style={{ marginTop: 16 }}>
         <ComplianceHub peclItems={peclItems} onTogglePecl={handlePeclToggle} />
@@ -1682,9 +1750,10 @@ function MobileLayout() {
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
         <Volume2 size={12} color="rgba(255,255,255,0.2)" />
         <span style={{ fontFamily: T.display, fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Live Transcript</span>
-        {callEnded && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#ff8a7b", background: "rgba(231,76,60,0.12)", padding: "1px 5px", borderRadius: 3 }}>● ended</span>}
-        {!callEnded && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
-        {!callEnded && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
+        {call.state === "idle" && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.04)", padding: "1px 5px", borderRadius: 3 }}>● idle</span>}
+        {call.state === "ended" && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#ff8a7b", background: "rgba(231,76,60,0.12)", padding: "1px 5px", borderRadius: 3 }}>● ended</span>}
+        {callActive && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
+        {callActive && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
         {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)", marginLeft: "auto" }}>Five9 — Maria Garcia</span>}
       </div>
       {renderedTranscript.map((line, i) => (
@@ -1755,26 +1824,27 @@ function MobileLayout() {
   // ─── Context bar (shown in tabs + split modes) ───
   const ContextBar = () => (
     <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "rgba(0,40,42,0.5)", borderBottom: "1px solid rgba(0,123,127,0.08)", flexShrink: 0, flexWrap: "wrap" }}>
-      <button onClick={() => !callEnded && setAudioOn(!audioOn)} disabled={callEnded} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: callEnded ? "rgba(255,255,255,0.03)" : (audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)"), border: `1px solid ${callEnded ? "rgba(255,255,255,0.06)" : (audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)")}`, borderRadius: 6, cursor: callEnded ? "default" : "pointer", opacity: callEnded ? 0.5 : 1 }}>
-        {audioOn && !callEnded ? <Volume2 size={12} color="#34C77B" /> : <MicOff size={12} color="rgba(255,255,255,0.3)" />}
-        <AudioWave active={audioOn && !callEnded} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
-        <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: audioOn && !callEnded ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn && !callEnded ? (liveAudio.live ? "Listening" : BACKEND_WSS_URL ? "Connecting" : "Listening") : "Muted"}</span>
+      <button onClick={() => callActive && setAudioOn(!audioOn)} disabled={!callActive} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: !callActive ? "rgba(255,255,255,0.03)" : (audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)"), border: `1px solid ${!callActive ? "rgba(255,255,255,0.06)" : (audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)")}`, borderRadius: 6, cursor: callActive ? "pointer" : "default", opacity: callActive ? 1 : 0.5 }}>
+        {audioOn && callActive ? <Volume2 size={12} color="#34C77B" /> : <MicOff size={12} color="rgba(255,255,255,0.3)" />}
+        <AudioWave active={audioOn && callActive} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
+        <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: audioOn && callActive ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn && callActive ? (liveAudio.live ? "Listening" : BACKEND_WSS_URL ? "Connecting" : "Listening") : "Muted"}</span>
       </button>
       <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? "rgba(0,123,127,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
         <Monitor size={12} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
         <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: screenOn ? T.teal : "rgba(255,255,255,0.3)" }}>{screenOn ? "Screen On" : "Screen Off"}</span>
       </button>
-      {callEnded ? (
-        <button onClick={handleResumeCall} title="Resume the call" style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "rgba(52,199,123,0.12)", border: "1px solid rgba(52,199,123,0.35)", borderRadius: 6, cursor: "pointer" }}>
-          <Phone size={11} color="#34C77B" />
-          <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 700, color: "#34C77B" }}>Resume</span>
-        </button>
-      ) : (
+      {callActive ? (
         <button onClick={handleEndCall} title="End call — stops mic + transcription" style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "rgba(231,76,60,0.12)", border: "1px solid rgba(231,76,60,0.35)", borderRadius: 6, cursor: "pointer" }}>
           <span style={{ width: 8, height: 8, borderRadius: 2, background: "#E74C3C" }} />
           <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 700, color: "#ff8a7b" }}>End Call</span>
         </button>
+      ) : (
+        <button onClick={handleStartCall} title="Start the call — opens mic + transcription" style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "rgba(52,199,123,0.18)", border: "1px solid rgba(52,199,123,0.5)", borderRadius: 6, cursor: "pointer", animation: "ctxStartPulse 2s ease-in-out infinite" }}>
+          <Phone size={11} color="#34C77B" />
+          <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 800, color: "#7be0a8", textTransform: "uppercase", letterSpacing: "0.04em" }}>{callEnded ? "Start New Call" : "Start Call"}</span>
+        </button>
       )}
+      <style>{`@keyframes ctxStartPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,199,123,0.45); } 50% { box-shadow: 0 0 0 5px rgba(52,199,123,0); } }`}</style>
       <div style={{ flex: 1 }} />
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(245,166,35,0.08)", borderRadius: 6 }}>
         <AlertTriangle size={10} color="#F5A623" />
@@ -1919,7 +1989,7 @@ function MobileLayout() {
 //  DESKTOP: MediCopilot Overlay (original)
 // ═══════════════════════════════════════
 
-function MediCopilotOverlay({ mode, setMode, opacity, callEnded = false, onEndCall, onResumeCall }) {
+function MediCopilotOverlay({ mode, setMode, opacity }) {
   const [inputVal, setInputVal] = useState("");
   const [audioOn, setAudioOn] = useState(true);
   const [screenOn, setScreenOn] = useState(true);
@@ -1937,24 +2007,46 @@ function MediCopilotOverlay({ mode, setMode, opacity, callEnded = false, onEndCa
   // Tier 4 — see MobileLayout for the matching state.
   const [peclOverrides, setPeclOverrides] = useState(() => new Map());
   const [insertedScripts, setInsertedScripts] = useState(() => new Set());
-  // Call elapsed timer feeds the inline MSP header badge — flips amber
-  // after 10min without coverage. Defaulted to 0 (info tone) on first
-  // render; an interval below ticks the value forward.
-  const [callStartedAt] = useState(() => Date.now());
+
+  // Call lifecycle from LeadContext. PECL elapsed timer keys off
+  // `call.startedAt` so MSP escalation only counts from when the agent
+  // clicked Start Call (not from app mount). Frozen at end-time once
+  // the call ends.
+  const { lead: ctxLead, call } = useLead();
+  const callActive = call.state === "active";
+  const callEnded = call.state === "ended";
+
   const [elapsedMs, setElapsedMs] = useState(0);
   useEffect(() => {
+    if (call.state === "idle" || !call.startedAt) {
+      setElapsedMs(0);
+      return undefined;
+    }
+    if (call.state === "ended" && call.endedAt) {
+      setElapsedMs(call.endedAt - call.startedAt);
+      return undefined;
+    }
+    setElapsedMs(Date.now() - call.startedAt);
     const id = setInterval(() => {
-      setElapsedMs(Date.now() - callStartedAt);
+      setElapsedMs(Date.now() - call.startedAt);
     }, 30_000);
     return () => clearInterval(id);
-  }, [callStartedAt]);
+  }, [call.state, call.startedAt, call.endedAt]);
+
+  const handleStartCall = useCallback(() => {
+    setAudioOn(true);
+    call.start();
+  }, [call]);
+  const handleEndCall = useCallback(() => {
+    call.end();
+    setAudioOn(false);
+  }, [call]);
 
   // Live audio pipeline (see MobileLayout for the matching wiring).
-  // callEnded → forces enabled=false → useLiveAudio cleanup releases the
-  // mic track and intentionally closes the WSS (no reconnect).
-  const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn && !callEnded });
+  // call.state !== "active" forces enabled=false → useLiveAudio cleanup
+  // releases the mic track and intentionally closes the WSS.
+  const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn && callActive });
   useAudioErrorToasts(liveAudio);
-  const { lead: ctxLead } = useLead();
   useLeadContextPush(liveAudio, ctxLead);
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
@@ -2054,12 +2146,26 @@ function MediCopilotOverlay({ mode, setMode, opacity, callEnded = false, onEndCa
   };
 
   // ─── Desktop panel content renderers ───
-  const renderDesktopCallInfo = () => (
+  const renderDesktopCallInfo = () => {
+    const dotBg = callActive ? "#34C77B" : callEnded ? "#E74C3C" : "rgba(255,255,255,0.35)";
+    const dotGlow = callActive
+      ? "0 0 6px rgba(52,199,123,0.4)"
+      : callEnded
+        ? "0 0 6px rgba(231,76,60,0.4)"
+        : "none";
+    const statusLabel = callActive ? "CONNECTED" : callEnded ? "CALL ENDED" : "READY";
+    const statusColor = callActive ? "#34C77B" : callEnded ? "#ff8a7b" : "rgba(255,255,255,0.45)";
+    const elapsedLabel = callActive
+      ? "08:12"
+      : callEnded && call.startedAt && call.endedAt
+        ? formatElapsed(call.endedAt - call.startedAt)
+        : "00:00";
+    return (
     <div style={{ padding: "8px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <div style={{ width: 8, height: 8, borderRadius: 4, background: "#34C77B", boxShadow: "0 0 6px rgba(52,199,123,0.4)" }} />
-        <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: "#34C77B" }}>CONNECTED</span>
-        <span style={{ fontFamily: T.mono, fontSize: 11, color: T.dusk }}>08:12</span>
+        <div style={{ width: 8, height: 8, borderRadius: 4, background: dotBg, boxShadow: dotGlow }} />
+        <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: statusColor }}>{statusLabel}</span>
+        <span style={{ fontFamily: T.mono, fontSize: 11, color: T.dusk }}>{elapsedLabel}</span>
       </div>
       <div style={{ fontFamily: T.mono, fontSize: 9, color: "#666", marginBottom: 10 }}>Campaign: AEP_MAPD_FL</div>
       <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: 10, marginBottom: 10 }}>
@@ -2073,25 +2179,38 @@ function MediCopilotOverlay({ mode, setMode, opacity, callEnded = false, onEndCa
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 10 }}>
-        {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"],["End Call","📕"]].map(([l,ic]) => (
-          <button key={l} onClick={l === "End Call" ? onEndCall : undefined} disabled={l === "End Call" && callEnded} style={{ background: l==="End Call" ? (callEnded ? "rgba(231,76,60,0.12)" : "rgba(231,76,60,0.3)") : "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 4px", cursor: l === "End Call" && callEnded ? "default" : "pointer", opacity: l === "End Call" && callEnded ? 0.55 : 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+        {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"]].map(([l,ic]) => (
+          <button key={l} disabled={!callActive} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 4px", cursor: callActive ? "pointer" : "default", opacity: callActive ? 1 : 0.45, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
             <span style={{ fontSize: 16 }}>{ic}</span>
-            <span style={{ fontFamily: T.display, fontSize: 9, color: "#999" }}>{l === "End Call" && callEnded ? "Ended" : l}</span>
+            <span style={{ fontFamily: T.display, fontSize: 9, color: "#999" }}>{l}</span>
           </button>
         ))}
+        {callActive ? (
+          <button onClick={handleEndCall} style={{ background: "rgba(231,76,60,0.3)", border: "1px solid rgba(231,76,60,0.45)", borderRadius: 8, padding: "8px 4px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+            <span style={{ fontSize: 16 }}>📕</span>
+            <span style={{ fontFamily: T.display, fontSize: 9, color: "#ff8a7b", fontWeight: 700 }}>End Call</span>
+          </button>
+        ) : (
+          <button onClick={handleStartCall} style={{ background: "rgba(52,199,123,0.25)", border: "1px solid rgba(52,199,123,0.45)", borderRadius: 8, padding: "8px 4px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, animation: "fivePulse 2s ease-in-out infinite" }}>
+            <span style={{ fontSize: 16 }}>📞</span>
+            <span style={{ fontFamily: T.display, fontSize: 9, color: "#7be0a8", fontWeight: 700 }}>{callEnded ? "Start New" : "Start Call"}</span>
+          </button>
+        )}
       </div>
       <ComplianceHub peclItems={peclItems} onTogglePecl={handlePeclToggle} compact />
     </div>
   );
+  };
 
   const renderDesktopTranscript = () => (
     <div style={{ padding: "6px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
         <Volume2 size={10} color="rgba(255,255,255,0.2)" />
         <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Live Transcript</span>
+        {call.state === "idle" && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.05)", padding: "1px 5px", borderRadius: 3 }}>● idle</span>}
         {callEnded && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#ff8a7b", background: "rgba(231,76,60,0.12)", padding: "1px 5px", borderRadius: 3 }}>● ended</span>}
-        {!callEnded && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
-        {!callEnded && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
+        {callActive && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
+        {callActive && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
         {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)", marginLeft: "auto" }}>Five9 — Maria Garcia, 33024</span>}
       </div>
       {renderedTranscript.map((line, i) => (
@@ -2444,26 +2563,27 @@ function MediCopilotOverlay({ mode, setMode, opacity, callEnded = false, onEndCa
 
         {/* ─── Context bar ─── */}
         <div data-no-drag="true" style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderBottom: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }}>
-          <button onClick={() => !callEnded && setAudioOn(!audioOn)} disabled={callEnded} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: callEnded ? "rgba(255,255,255,0.03)" : (audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)"), border: `1px solid ${callEnded ? "rgba(255,255,255,0.06)" : (audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)")}`, borderRadius: 6, cursor: callEnded ? "default" : "pointer", opacity: callEnded ? 0.5 : 1 }}>
-            {audioOn && !callEnded ? <Volume2 size={11} color="#34C77B" /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
-            <AudioWave active={audioOn && !callEnded} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
-            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: audioOn && !callEnded ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn && !callEnded ? (liveAudio.live ? "Listening" : (BACKEND_WSS_URL ? "Connecting" : "Listening")) : "Muted"}</span>
+          <button onClick={() => callActive && setAudioOn(!audioOn)} disabled={!callActive} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: !callActive ? "rgba(255,255,255,0.03)" : (audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)"), border: `1px solid ${!callActive ? "rgba(255,255,255,0.06)" : (audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)")}`, borderRadius: 6, cursor: callActive ? "pointer" : "default", opacity: callActive ? 1 : 0.5 }}>
+            {audioOn && callActive ? <Volume2 size={11} color="#34C77B" /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
+            <AudioWave active={audioOn && callActive} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: audioOn && callActive ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn && callActive ? (liveAudio.live ? "Listening" : (BACKEND_WSS_URL ? "Connecting" : "Listening")) : "Muted"}</span>
           </button>
           <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? "rgba(0,123,127,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
             <Monitor size={11} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
             <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: screenOn ? T.teal : "rgba(255,255,255,0.3)" }}>{screenOn ? "Screen On" : "Screen Off"}</span>
           </button>
-          {callEnded ? (
-            <button onClick={onResumeCall} title="Resume the call" style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(52,199,123,0.12)", border: "1px solid rgba(52,199,123,0.35)", borderRadius: 6, cursor: "pointer" }}>
-              <Phone size={10} color="#34C77B" />
-              <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "#34C77B" }}>Resume</span>
-            </button>
-          ) : (
-            <button onClick={onEndCall} title="End call — stops mic + transcription" style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(231,76,60,0.12)", border: "1px solid rgba(231,76,60,0.35)", borderRadius: 6, cursor: "pointer" }}>
+          {callActive ? (
+            <button onClick={handleEndCall} title="End call — stops mic + transcription" style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(231,76,60,0.12)", border: "1px solid rgba(231,76,60,0.35)", borderRadius: 6, cursor: "pointer" }}>
               <span style={{ width: 7, height: 7, borderRadius: 2, background: "#E74C3C" }} />
               <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "#ff8a7b" }}>End Call</span>
             </button>
+          ) : (
+            <button onClick={handleStartCall} title="Start the call — opens mic + transcription" style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", background: "rgba(52,199,123,0.18)", border: "1px solid rgba(52,199,123,0.5)", borderRadius: 6, cursor: "pointer", animation: "ctxStartPulse 2s ease-in-out infinite" }}>
+              <Phone size={10} color="#34C77B" />
+              <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 800, color: "#7be0a8", textTransform: "uppercase", letterSpacing: "0.04em" }}>{callEnded ? "Start New Call" : "Start Call"}</span>
+            </button>
           )}
+          <style>{`@keyframes ctxStartPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,199,123,0.45); } 50% { box-shadow: 0 0 0 5px rgba(52,199,123,0); } }`}</style>
           <div style={{ flex: 1 }} />
           {mspBadge !== "hidden" && (
             <div
@@ -2609,11 +2729,10 @@ export default function MacOSDesktopMockup() {
   const isMobile = useIsMobile();
   const [mode, setMode] = useState("expanded");
   const [opacity, setOpacity] = useState(0.82);
-  // Call lifecycle is lifted here so the standalone Five9Window mock and
-  // the overlay's own End Call button drive the same state.
-  const [callEnded, setCallEnded] = useState(false);
-  const handleEndCall = useCallback(() => setCallEnded(true), []);
-  const handleResumeCall = useCallback(() => setCallEnded(false), []);
+  // Call lifecycle lives in LeadContext so the Five9 mock, the overlay,
+  // and any future P4 CallKit listener can all agree on whether a call
+  // is active.
+  const { call } = useLead();
 
   if (isMobile) return <MobileLayout />;
 
@@ -2624,8 +2743,8 @@ export default function MacOSDesktopMockup() {
         <div style={{ position: "absolute", bottom: "20%", right: "30%", width: 300, height: 300, borderRadius: "50%", background: "rgba(244,124,110,0.06)", filter: "blur(60px)" }} />
       </div>
       <MacMenuBar />
-      <Five9Window callEnded={callEnded} onEndCall={handleEndCall} />
-      <MediCopilotOverlay mode={mode} setMode={setMode} opacity={opacity} callEnded={callEnded} onEndCall={handleEndCall} onResumeCall={handleResumeCall} />
+      <Five9Window callState={call.state} onStartCall={call.start} onEndCall={call.end} />
+      <MediCopilotOverlay mode={mode} setMode={setMode} opacity={opacity} />
       <MacDock />
       <div style={{ position: "absolute", top: 32, left: "50%", transform: "translateX(-50%)", padding: "4px 12px", background: "rgba(0,0,0,0.5)", borderRadius: 8, fontFamily: T.display, fontSize: 11, color: "rgba(255,255,255,0.5)" }}>
         Drag MediCopilot anywhere · Click "Ask AI" or ⌘Enter to see next response

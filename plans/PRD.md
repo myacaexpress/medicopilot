@@ -429,6 +429,11 @@ speakerphone required), and toggles with a global hotkey.
 - Notarized DMG build pipeline (GitHub Actions), signed with Apple
   Developer ID; auto-updater via `tauri-plugin-updater`
 - Menu bar icon + "Quit / Preferences / Install Updates" menu
+- **Auto call-start detection via macOS CallKit + Continuity** — iPhone
+  ringing fires a native event that pops the overlay and starts
+  transcription without manual button press. This is the **P4 headline
+  demo feature**: replaces the explicit "Start Call" click that the web
+  build requires (P1–P3) with zero-touch handoff from the phone.
 
 **Architectural reference:** Pluely (see Reference Implementations above)
 demonstrates this exact stack at ~10MB bundle and <100ms startup. Study
