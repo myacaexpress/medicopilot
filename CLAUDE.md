@@ -16,7 +16,9 @@ If you read CLAUDE.md + PRD + ui-final-spec.md (in that order), you should be pr
 
 ## Current phase
 
-**P0 Foundations.** Foundational scaffolding — repo hygiene, env templates, data extraction from the monolith, v1-demo snapshot preservation. No real integrations yet; the current deploy is still the interactive mockup at [medicopilot.vercel.app](https://medicopilot.vercel.app).
+**P2 Tier 1 — Server scaffold.** Fastify 5 backend in `server/` with `@fastify/websocket`, pino logger, `GET /health`, and a skeleton `WSS /stream` that round-trips `ping`→`pong`. Deployable to Fly.io iad (`server/fly.toml` + Dockerfile). Tests: 36 frontend (Vitest) + 4 server (node:test). Tier 2 will wire browser mic → AudioWorklet → WSS → Deepgram.
+
+P1 OCR MVP shipped earlier: real `getDisplayMedia` + Claude Vision extraction in CaptureLeadModal, LeadProvider + localStorage, Vercel fns at `api/extract-lead` (vision) and `api/extract-lead-text` (paste), consent banner, mobile photo + paste fallbacks, inline edit, SourcesRow hover highlight, marquee guard, single-slot toast.
 
 The frozen v1 snapshot is tagged `v1-demo` and served independently from the primary deploy. Do not remove that tag.
 
@@ -71,10 +73,24 @@ All secrets live in environment variables — **never in the client bundle**. Se
 │   ├── ui-mockup.html            — static HTML references
 │   └── ui-integrated-mockup.html
 ├── src/
-│   ├── App.jsx                   — entry
+│   ├── App.jsx                   — entry (wraps with LeadProvider)
 │   ├── main.jsx
 │   ├── index.css
 │   ├── MediCopilot_macOS_Mockup.jsx  — monolith (being broken up through P0→P2)
+│   ├── lead/                     — Lead state management (P1)
+│   │   └── LeadContext.jsx       — LeadProvider, useLead(), reducer, buildLeadFromExtraction
+│   ├── capture/                  — Capture primitives (P1)
+│   │   ├── index.js              — barrel export
+│   │   ├── useScreenCapture.js   — getDisplayMedia + frame grab + cropToBase64
+│   │   ├── extractLeadFromImage.js — API client for vision + text extraction
+│   │   ├── useConsentBanner.js   — consent state hook (sessionStorage gate)
+│   │   └── ConsentBanner.jsx     — recording consent banner UI
+│   ├── ui/                       — Cross-cutting UI primitives
+│   │   └── Toast.jsx             — ToastProvider + useToast() (P1 error surfacing)
+│   ├── __tests__/                — Vitest tests
+│   │   ├── leadContext.test.js   — reducer + helpers
+│   │   ├── dataShape.test.js     — mock data shape validation
+│   │   └── consentBanner.test.js — consent policy logic
 │   └── data/                     — extracted mock data modules (P0)
 │       ├── leads.js              — MOCK_LEADS + RECENT_LEADS
 │       ├── transcript.js         — simulated transcript lines
@@ -85,11 +101,21 @@ All secrets live in environment variables — **never in the client bundle**. Se
 │       │   └── seed.json
 │       └── compliance/
 │           └── states.js         — two-party-consent state list
-├── api/                          — Vercel Edge Functions (P1+)
-│   ├── extract-lead.ts           — vision OCR (P1)
-│   ├── extract-lead-text.ts      — paste-parse (P1)
+├── api/                          — Vercel Serverless Functions (P1+)
+│   ├── extract-lead.js           — vision OCR via Claude Sonnet (P1)
+│   ├── extract-lead-text.js      — paste-parse via Claude Haiku (P1)
 │   └── auth/                     — SMS-OTP endpoints (P2)
 ├── server/                       — Fastify app (P2+)
+│   ├── package.json              — own deps (fastify, @fastify/websocket, pino)
+│   ├── fly.toml + Dockerfile     — Fly.io iad deploy config
+│   ├── src/
+│   │   ├── index.js              — Fastify bootstrap + graceful shutdown
+│   │   ├── env.js                — env loader
+│   │   ├── logger.js             — pino (pretty in dev, JSON in prod)
+│   │   └── routes/
+│   │       ├── health.js         — GET /health
+│   │       └── stream.js         — WSS /stream (Tier 1: ping/pong skeleton)
+│   └── test/                     — node:test runner (no vitest)
 └── src-tauri/                    — Tauri wrapper (P4)
 ```
 
@@ -140,16 +166,18 @@ Inferred from existing code — keep consistent unless PRD calls for a change.
 ## Scripts
 
 ```
-npm run dev       # Vite dev server on :5173
-npm run build     # production build to dist/
-npm run preview   # preview the prod build locally
-npm run lint      # ESLint
+npm run dev         # Vite dev server on :5173
+npm run build       # production build to dist/
+npm run preview     # preview the prod build locally
+npm run lint        # ESLint
+npm test            # Vitest (36 frontend tests)
+npm run test:watch  # Vitest in watch mode
+npm run server:dev  # Fastify server on :8080 (node --watch)
+npm run server:test # node:test runner for server/ (4 tests)
 ```
 
 Planned scripts (per phase):
-- `npm run test` (Vitest, P0)
 - `npm run typecheck` (P0 — JSDoc first, full TS at P2)
-- `npm run server:dev` (Fastify, P2)
 - `npm run tauri:dev` (P4)
 
 ## Current contributors

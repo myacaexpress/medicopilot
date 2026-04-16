@@ -1,0 +1,25 @@
+{
+  "name": "medicopilot-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MediCopilot backend — Fastify WSS server for live transcript + AI suggestions (P2+)",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "test": "node --test --test-reporter=spec test/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.90.0",
+    "@fastify/websocket": "^11.2.0",
+    "fastify": "^5.8.2",
+    "pino": "^10.0.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13.1.2"
+  }
+}

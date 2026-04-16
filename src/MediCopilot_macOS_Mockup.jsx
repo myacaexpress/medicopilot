@@ -6,7 +6,21 @@ import {
   transcriptLines,
   aiResponses,
   DEFAULT_PECL_ITEMS,
+  mergePeclItems,
+  togglePeclOverride,
+  COMPLIANCE_SCRIPTS,
+  applyInsertedScripts,
+  mspBadgeMode,
 } from "./data/index.js";
+import { useLead, buildLeadFromExtraction, commitLeadEdit, makeField } from "./lead/LeadContext.jsx";
+import { useScreenCapture } from "./capture/useScreenCapture.js";
+import { extractLeadFromImage, extractLeadFromText } from "./capture/extractLeadFromImage.js";
+import { useConsentBanner } from "./capture/useConsentBanner.js";
+import { ConsentBanner } from "./capture/ConsentBanner.jsx";
+import { useToast } from "./ui/Toast.jsx";
+import { useLiveAudio } from "./audio/index.js";
+
+const BACKEND_WSS_URL = import.meta.env.VITE_BACKEND_WSS_URL || null;
 
 const T = {
   teal: "#007B7F", tealDark: "#004D50", tealLight: "#1A9EA2",
@@ -89,16 +103,47 @@ function useResizable(iw, ih, minW = 320, minH = 400) {
 }
 
 // ─── Audio waveform animation ───
-function AudioWave({ active, color = T.teal, bars = 5 }) {
+// When `analyser` (an AnalyserNode) is provided, bar heights are driven by
+// real-time frequency data via requestAnimationFrame. Otherwise the bars
+// fall back to a CSS keyframe animation for the demo / muted state.
+function AudioWave({ active, color = T.teal, bars = 5, analyser = null }) {
+  const barRefs = useRef([]);
+
+  useEffect(() => {
+    if (!analyser || !active) return;
+    const fftBins = analyser.frequencyBinCount;
+    if (!fftBins) return;
+    const data = new Uint8Array(fftBins);
+    const span = Math.max(1, Math.floor(fftBins / bars));
+    let raf = 0;
+    const tick = () => {
+      analyser.getByteFrequencyData(data);
+      for (let i = 0; i < bars; i++) {
+        let sum = 0;
+        for (let j = 0; j < span; j++) sum += data[i * span + j] || 0;
+        const level = sum / span / 255; // 0..1
+        const h = Math.max(2, Math.round(level * 14));
+        const el = barRefs.current[i];
+        if (el) {
+          el.style.height = `${h}px`;
+          el.style.animation = "none";
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [analyser, active, bars]);
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 2, height: 16 }}>
       {Array.from({ length: bars }).map((_, i) => (
-        <div key={i} style={{
+        <div key={i} ref={el => (barRefs.current[i] = el)} style={{
           width: 2, borderRadius: 1,
           background: active ? color : "rgba(255,255,255,0.15)",
           height: active ? `${6 + Math.sin(Date.now() / 200 + i * 1.2) * 5}px` : 4,
           animation: active ? `wave${i} 0.6s ease-in-out ${i * 0.1}s infinite alternate` : "none",
-          transition: "height 0.15s ease",
+          transition: "height 0.08s ease",
         }} />
       ))}
       <style>{`
@@ -132,6 +177,117 @@ function ConfidencePill({ level }) {
       border: `1px solid ${s.bd}`, background: s.bg, color: s.c, whiteSpace: "nowrap",
     }}>{s.label}</span>
   );
+}
+
+// ─── Live-transcript adapter ───
+// Server emits `{ type, sessionId, final, speaker, text, ts, redactionCounts }`.
+// Render code expects `{ time, speaker, text, isQuestion }` where speaker is
+// "client" or "agent" (mockup convention). Diarization gives us a numeric
+// speaker index — for the demo we map even → agent, odd → client. Refining
+// this requires channel-split audio (P3) and isn't worth it now.
+function mapLiveTranscripts(transcripts) {
+  return transcripts.map((u, i) => {
+    const ts = u.ts ? new Date(u.ts) : null;
+    const time = ts && !Number.isNaN(ts.getTime())
+      ? `${String(ts.getMinutes()).padStart(2, "0")}:${String(ts.getSeconds()).padStart(2, "0")}`
+      : `${String(Math.floor(i / 6)).padStart(2, "0")}:${String((i * 10) % 60).padStart(2, "0")}`;
+    const speakerNum = typeof u.speaker === "number" ? u.speaker : 0;
+    const speaker = speakerNum % 2 === 0 ? "agent" : "client";
+    const text = u.text || "";
+    const isQuestion = /\?\s*$/.test(text);
+    return { time, speaker, text, isQuestion };
+  });
+}
+
+// Convert finished live suggestions into the shape AIResponseCard
+// (mobile) and renderDesktopCopilot expect. Streaming suggestions are
+// elided — we only swap in the live card once the structured tool
+// input has fully arrived.
+function liveSuggestionsToCards(suggestions) {
+  return suggestions
+    .filter((s) => s.status === "done" && s.suggestion)
+    .map((s) => {
+      const ai = s.suggestion;
+      return {
+        trigger: `Live · ${s.kind}`,
+        context: { screen: "Live", audio: `Live trigger: ${s.kind}` },
+        // Mobile card uses `response`; desktop renderer reads `sayThis`.
+        response: ai.sayThis,
+        sayThis: ai.sayThis,
+        pressMore: ai.pressMore || [],
+        followUps: ai.followUps || [],
+        compliance: ai.compliance,
+        sources: ai.sources,
+      };
+    });
+}
+
+// Push the lead snapshot to the server whenever the lead identity or
+// the connection comes online. The server uses it as Claude prompt
+// context; sending a sparse object is fine — the prompt handles "(no
+// lead context yet)".
+function useLeadContextPush(liveAudio, lead) {
+  const lastSentRef = useRef(null);
+  useEffect(() => {
+    if (!liveAudio || !liveAudio.serverReady) return;
+    const snapshot = lead
+      ? {
+          id: lead.id,
+          state: lead.state ?? null,
+          firstName: lead.fields?.firstName?.v ?? null,
+          lastName: lead.fields?.lastName?.v ?? null,
+          dob: lead.fields?.dob?.v ?? null,
+          medications: lead.fields?.medications?.v ?? null,
+          providers: lead.fields?.providers?.v ?? null,
+          coverage: lead.fields?.coverage?.v ?? null,
+        }
+      : null;
+    const serialized = JSON.stringify(snapshot);
+    if (lastSentRef.current === serialized) return;
+    lastSentRef.current = serialized;
+    liveAudio.setLeadContext?.(snapshot);
+  }, [liveAudio, lead]);
+}
+
+// Surface stream/mic errors via the toast system. Tracks the last shown
+// error code so a single transient blip doesn't fire the same toast twice.
+function useAudioErrorToasts({ noKeyError, micError, streamError }) {
+  const toast = useToast();
+  const lastShownRef = useRef({ key: null });
+  useEffect(() => {
+    if (noKeyError) {
+      const key = "no_api_key";
+      if (lastShownRef.current.key === key) return;
+      lastShownRef.current.key = key;
+      toast.show({
+        kind: "error",
+        title: "Live transcription unavailable",
+        detail: "Server is missing DEEPGRAM_API_KEY. Falling back to demo transcript.",
+      });
+      return;
+    }
+    if (micError) {
+      const key = "mic_error";
+      if (lastShownRef.current.key === key) return;
+      lastShownRef.current.key = key;
+      toast.show({
+        kind: "warn",
+        title: "Mic unavailable",
+        detail: micError.message || "Could not access microphone.",
+      });
+      return;
+    }
+    if (streamError && streamError.code !== "no_api_key") {
+      const key = `stream_${streamError.code}`;
+      if (lastShownRef.current.key === key) return;
+      lastShownRef.current.key = key;
+      toast.show({
+        kind: "warn",
+        title: "Live audio interrupted",
+        detail: streamError.message || streamError.code,
+      });
+    }
+  }, [noKeyError, micError, streamError, toast]);
 }
 
 function RecordingPill({ audioOn }) {
@@ -221,78 +377,201 @@ function SwitchLeadModal({ activeId, onPick, onClose }) {
 }
 
 function CaptureLeadModal({ onCommit, onClose }) {
-  const [stage, setStage] = useState("choose"); // choose | selecting | extracting | review
-  const [source, setSource] = useState(null); // "region" | "screen" | "manual"
-  const [progress, setProgress] = useState(0);
+  // choose | capturing | selecting | extracting | review | paste | error
+  const [stage, setStage] = useState("choose");
   const [extracted, setExtracted] = useState(null);
+  const [error, setError] = useState(null);
+  const [pasteText, setPasteText] = useState("");
+
+  // Real screen capture hook
+  const screen = useScreenCapture();
+
+  // Consent banner (derive state from lead context if available)
+  const { lead } = useLead();
+  const leadState = lead?.fields?.address?.v?.state;
+  const consent = useConsentBanner({ leadStateCode: leadState });
+  const toast = useToast();
+
+  // Centralized error surfacer: sets inline error stage AND emits a toast
+  // (toast gives a glanceable notification above the modal; stage gives
+  // recovery actions inside it).
+  const surfaceError = useCallback((message, { toastKind = "error", toastTitle, toastDetail } = {}) => {
+    setError(message);
+    setStage("error");
+    toast.show({
+      kind: toastKind,
+      title: toastTitle || (toastKind === "warn" ? "No lead info found" : "Extraction failed"),
+      detail: toastDetail || message,
+    });
+  }, [toast]);
+
+  // Marquee selection state (user drags on the captured frame)
   const [marquee, setMarquee] = useState({ x: 0, y: 0, w: 0, h: 0 });
-  const [marqueeDone, setMarqueeDone] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const frameRef = useRef(null);
 
-  // Animate the marquee drawing in the "selecting" stage (mock drag)
-  useEffect(() => {
-    if (stage !== "selecting") return;
-    setMarqueeDone(false);
-    const target = { x: 48, y: 80, w: 310, h: 150 };
-    const startX = 78, startY = 120;
-    setMarquee({ x: startX, y: startY, w: 0, h: 0 });
-    let t = 0;
-    const iv = setInterval(() => {
-      t += 1;
-      const p = Math.min(t / 18, 1);
-      setMarquee({
-        x: startX - (startX - target.x) * p,
-        y: startY - (startY - target.y) * p,
-        w: target.w * p,
-        h: target.h * p,
-      });
-      if (p >= 1) {
-        clearInterval(iv);
-        setMarqueeDone(true);
-      }
-    }, 40);
-    return () => clearInterval(iv);
-  }, [stage]);
-
-  useEffect(() => {
-    if (stage !== "extracting") return;
-    setProgress(0);
-    const iv = setInterval(() => {
-      setProgress(p => {
-        const np = p + 12;
-        if (np >= 100) {
-          clearInterval(iv);
-          setExtracted({
-            Name: { v: "Harold Weaver", pill: "high" },
-            DOB: { v: "Jul 09, 1955", pill: "medium" },
-            Phone: { v: "(786) 555-0319", pill: "high" },
-            "Address · ZIP": { v: "Hialeah, FL 33013", pill: "medium" },
-            Coverage: { v: "Original Medicare (Part A only)", pill: "low" },
-          });
-          setStage("review");
-          return 100;
-        }
-        return np;
-      });
-    }, 180);
-    return () => clearInterval(iv);
-  }, [stage]);
-
-  const startExtract = (src) => {
-    setSource(src);
+  const startExtract = async (src) => {
+    setError(null);
     if (src === "manual") {
       setExtracted({
-        Name: { v: "", pill: "low" },
-        DOB: { v: "", pill: "low" },
-        Phone: { v: "", pill: "low" },
-        "Address · ZIP": { v: "", pill: "low" },
-        Coverage: { v: "", pill: "low" },
+        firstName: { v: "", confidence: "low" },
+        lastName: { v: "", confidence: "low" },
+        dob: { v: "", confidence: "low" },
+        phone: { v: "", confidence: "low" },
+        address: { v: "", confidence: "low" },
+        coverage: { v: "", confidence: "low" },
       });
       setStage("review");
-    } else if (src === "region") {
-      setStage("selecting");
-    } else {
-      setStage("extracting");
+    } else if (src === "paste") {
+      setPasteText("");
+      setStage("paste");
+    } else if (src === "region" || src === "screen") {
+      // Use real getDisplayMedia
+      await screen.requestCapture();
     }
+  };
+
+  // When screen capture completes, move to selecting stage
+  useEffect(() => {
+    if (screen.status === "captured" && screen.capturedFrame) {
+      setMarquee({ x: 0, y: 0, w: 0, h: 0 });
+      setStage("selecting");
+    } else if (screen.status === "denied") {
+      surfaceError("Screen access denied. Enable in browser settings or enter manually.", {
+        toastTitle: "Screen access denied",
+      });
+    } else if (screen.status === "unsupported") {
+      surfaceError("Screen capture is not supported on this device. Use photo upload or paste instead.", {
+        toastTitle: "Capture unavailable",
+        toastKind: "warn",
+      });
+    }
+  }, [screen.status, screen.capturedFrame, surfaceError]);
+
+  // Mouse handlers for marquee drawing on the captured frame
+  const handleFrameMouseDown = (e) => {
+    if (!frameRef.current) return;
+    const rect = frameRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setDragStart({ x, y });
+    setMarquee({ x, y, w: 0, h: 0 });
+    setDragging(true);
+  };
+  const handleFrameMouseMove = (e) => {
+    if (!dragging || !frameRef.current) return;
+    const rect = frameRef.current.getBoundingClientRect();
+    const cx = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const cy = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+    setMarquee({
+      x: Math.min(dragStart.x, cx),
+      y: Math.min(dragStart.y, cy),
+      w: Math.abs(cx - dragStart.x),
+      h: Math.abs(cy - dragStart.y),
+    });
+  };
+  const handleFrameMouseUp = () => {
+    setDragging(false);
+  };
+
+  // Per spec §2 error table: require both dimensions ≥ 20px before Extract
+  // is eligible. Anything smaller is almost certainly a misclick.
+  const MIN_MARQUEE = 20;
+  const hasAnyMarquee = marquee.w > 0 && marquee.h > 0;
+  const marqueeTooSmall = hasAnyMarquee && (marquee.w < MIN_MARQUEE || marquee.h < MIN_MARQUEE);
+  const marqueeDone = !dragging && hasAnyMarquee && !marqueeTooSmall;
+
+  // Run extraction on the cropped region
+  const handleExtract = async () => {
+    if (!marqueeDone) return;
+    setStage("extracting");
+    setError(null);
+
+    // Map marquee coordinates from display space to full-resolution frame space
+    const el = frameRef.current;
+    if (!el) return;
+    const displayW = el.clientWidth;
+    const displayH = el.clientHeight;
+    const scaleX = screen.frameWidth / displayW;
+    const scaleY = screen.frameHeight / displayH;
+
+    const cropRect = {
+      x: marquee.x * scaleX,
+      y: marquee.y * scaleY,
+      w: marquee.w * scaleX,
+      h: marquee.h * scaleY,
+    };
+
+    const base64 = screen.cropToBase64(cropRect);
+    if (!base64) {
+      surfaceError("Failed to crop region. Try again.", { toastTitle: "Crop failed" });
+      return;
+    }
+
+    const result = await extractLeadFromImage(base64);
+    if (result.kind === "success") {
+      setExtracted(result.fields);
+      setStage("review");
+    } else if (result.kind === "empty") {
+      surfaceError("No lead info found. Try again or paste manually.", {
+        toastKind: "warn",
+        toastTitle: "No lead info found",
+      });
+    } else if (result.kind === "denied") {
+      surfaceError("API access denied. Check configuration.", { toastTitle: "API denied" });
+    } else {
+      surfaceError(result.error || "Extraction failed. Retry.");
+    }
+  };
+
+  // Handle paste extraction
+  const handlePasteExtract = async () => {
+    if (!pasteText.trim()) return;
+    setStage("extracting");
+    const result = await extractLeadFromText(pasteText);
+    if (result.kind === "success") {
+      setExtracted(result.fields);
+      setStage("review");
+    } else {
+      surfaceError(result.error || "No lead info found in pasted text.", {
+        toastKind: result.kind === "empty" ? "warn" : "error",
+        toastTitle: result.kind === "empty" ? "No lead info found" : "Paste parse failed",
+      });
+    }
+  };
+
+  // Handle photo upload (mobile fallback)
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setStage("extracting");
+    setError(null);
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const result = await extractLeadFromImage(reader.result);
+      if (result.kind === "success") {
+        setExtracted(result.fields);
+        setStage("review");
+      } else {
+        surfaceError(result.error || "No lead info found in photo.", {
+          toastKind: result.kind === "empty" ? "warn" : "error",
+          toastTitle: result.kind === "empty" ? "No lead info found" : "Photo parse failed",
+        });
+      }
+    };
+    reader.onerror = () => {
+      surfaceError("Failed to read file.", { toastTitle: "File read failed" });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Field labels for the review UI
+  const fieldLabels = {
+    firstName: "First Name", lastName: "Last Name", dob: "DOB",
+    phone: "Phone", address: "Address", coverage: "Coverage",
+    medications: "Medications", providers: "Providers",
   };
 
   return (
@@ -307,13 +586,20 @@ function CaptureLeadModal({ onCommit, onClose }) {
         border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14,
         boxShadow: "0 16px 48px rgba(0,0,0,0.5)", overflow: "hidden",
       }}>
+        {/* Consent banner */}
+        {consent.shouldShowBanner && (
+          <ConsentBanner isTwoParty={consent.isTwoParty} onDismiss={consent.dismiss} />
+        )}
+
         <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: T.teal }}>⊕ Capture lead</span>
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.3)" }}>
             {stage === "choose" && "· choose source"}
             {stage === "selecting" && "· drag to select a region"}
-            {stage === "extracting" && `· extracting from ${source === "region" ? "region" : "screen"}`}
+            {stage === "extracting" && "· extracting…"}
             {stage === "review" && "· review & commit"}
+            {stage === "paste" && "· paste lead info"}
+            {stage === "error" && "· error"}
           </span>
           <div style={{ flex: 1 }} />
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
@@ -322,114 +608,175 @@ function CaptureLeadModal({ onCommit, onClose }) {
         </div>
 
         {stage === "choose" && (
-          <div style={{ padding: 14, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            {[
-              { k: "region", icon: "◩", title: "Select region", sub: "Drag a box around any fields on screen" },
-              { k: "screen", icon: "🖥", title: "Full window", sub: "Grab the active Five9 / CRM window" },
-              { k: "manual", icon: "⌨", title: "Manual", sub: "Type the fields yourself" },
-            ].map(o => (
-              <button key={o.k} onClick={() => startExtract(o.k)} style={{
-                padding: "14px 10px", background: "rgba(255,255,255,0.03)",
+          <div style={{ padding: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              {[
+                { k: "region", icon: "◩", title: "Screen capture", sub: "Capture screen & drag a box around lead fields" },
+                { k: "manual", icon: "⌨", title: "Manual", sub: "Type the fields yourself" },
+              ].map(o => (
+                <button key={o.k} onClick={() => startExtract(o.k)} style={{
+                  padding: "14px 10px", background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10,
+                  cursor: "pointer", textAlign: "left", color: "#fff",
+                }}>
+                  <div style={{ fontSize: 22, marginBottom: 6 }}>{o.icon}</div>
+                  <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: "#fff" }}>{o.title}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 3, lineHeight: 1.35 }}>{o.sub}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button onClick={() => startExtract("paste")} style={{
+                padding: "10px 10px", background: "rgba(255,255,255,0.03)",
                 border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10,
                 cursor: "pointer", textAlign: "left", color: "#fff",
               }}>
-                <div style={{ fontSize: 22, marginBottom: 6 }}>{o.icon}</div>
-                <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: "#fff" }}>{o.title}</div>
-                <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 3, lineHeight: 1.35 }}>{o.sub}</div>
+                <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.8)" }}>📋 Paste text</div>
+                <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Paste from CRM or notes</div>
               </button>
-            ))}
+              <label style={{
+                padding: "10px 10px", background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10,
+                cursor: "pointer", textAlign: "left", color: "#fff",
+              }}>
+                <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.8)" }}>📷 Photo upload</div>
+                <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Snap a photo of the screen</div>
+                <input type="file" accept="image/*" capture="environment" onChange={handlePhotoUpload}
+                  style={{ display: "none" }} />
+              </label>
+            </div>
           </div>
         )}
 
-        {stage === "selecting" && (
+        {stage === "selecting" && screen.capturedFrame && (
           <div style={{ padding: 14 }}>
             <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.45)", marginBottom: 8 }}>
-              Crosshair active · dim layer covering desktop · drag to draw a region around the fields you want captured.
+              Drag to draw a region around the fields you want captured.
             </div>
-            {/* Mock "desktop" with a Five9 card underneath */}
-            <div style={{
-              position: "relative", height: 240, borderRadius: 10, overflow: "hidden",
-              background: "linear-gradient(135deg, #1a2230, #0d1520)",
-              border: "1px solid rgba(255,255,255,0.06)",
-              cursor: "crosshair",
-            }}>
-              {/* Faux Five9 lead card */}
-              <div style={{
-                position: "absolute", left: 32, top: 64, width: 340, padding: "12px 14px",
-                background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 8,
-              }}>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>Five9 · Inbound · 08:14</div>
-                <div style={{ fontFamily: T.body, fontSize: 11, color: "rgba(255,255,255,0.85)", lineHeight: 1.55 }}>
-                  <div><b>Caller:</b> Harold Weaver</div>
-                  <div><b>DOB:</b> 07/09/1955 · Age 70</div>
-                  <div><b>Phone:</b> (786) 555-0319</div>
-                  <div><b>Address:</b> Hialeah, FL 33013</div>
-                  <div><b>Coverage:</b> Medicare Part A only</div>
-                </div>
-              </div>
+            <div
+              ref={frameRef}
+              onMouseDown={handleFrameMouseDown}
+              onMouseMove={handleFrameMouseMove}
+              onMouseUp={handleFrameMouseUp}
+              onMouseLeave={handleFrameMouseUp}
+              style={{
+                position: "relative", height: 280, borderRadius: 10, overflow: "hidden",
+                border: "1px solid rgba(255,255,255,0.06)",
+                cursor: "crosshair", userSelect: "none",
+              }}
+            >
+              <img src={screen.capturedFrame} alt="Captured screen"
+                style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }}
+                draggable={false}
+              />
               {/* Dimming overlay with cut-out for marquee */}
-              <div style={{
-                position: "absolute", inset: 0,
-                background: "rgba(0,0,0,0.55)",
-                clipPath: `polygon(
-                  0 0, 100% 0, 100% 100%, 0 100%, 0 0,
-                  ${marquee.x}px ${marquee.y}px,
-                  ${marquee.x}px ${marquee.y + marquee.h}px,
-                  ${marquee.x + marquee.w}px ${marquee.y + marquee.h}px,
-                  ${marquee.x + marquee.w}px ${marquee.y}px,
-                  ${marquee.x}px ${marquee.y}px
-                )`,
-              }} />
-              {/* Marquee border */}
-              {(marquee.w > 0 || marquee.h > 0) && (
-                <div style={{
-                  position: "absolute",
-                  left: marquee.x, top: marquee.y,
-                  width: marquee.w, height: marquee.h,
-                  border: `1.5px dashed ${T.teal}`,
-                  boxShadow: "0 0 0 1px rgba(0,123,127,0.3), 0 8px 24px rgba(0,123,127,0.25)",
-                  background: "rgba(0,123,127,0.05)",
-                  pointerEvents: "none",
-                }}>
-                  {marqueeDone && (
-                    <div style={{
-                      position: "absolute", top: -20, left: 0,
-                      fontFamily: T.mono, fontSize: 9, color: T.teal,
-                      padding: "2px 6px", background: "rgba(0,123,127,0.15)", borderRadius: 3,
-                    }}>
-                      {Math.round(marquee.w)} × {Math.round(marquee.h)} · region locked
-                    </div>
-                  )}
-                </div>
-              )}
-              {/* Size label while drawing */}
-              {!marqueeDone && marquee.w > 0 && (
-                <div style={{
-                  position: "absolute",
-                  left: marquee.x + marquee.w + 6, top: marquee.y + marquee.h - 14,
-                  fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.7)",
-                  padding: "2px 6px", background: "rgba(0,0,0,0.6)", borderRadius: 3,
-                }}>
-                  {Math.round(marquee.w)} × {Math.round(marquee.h)}
-                </div>
+              {marquee.w > 0 && marquee.h > 0 && (
+                <>
+                  <div style={{
+                    position: "absolute", inset: 0,
+                    background: "rgba(0,0,0,0.55)",
+                    clipPath: `polygon(
+                      0 0, 100% 0, 100% 100%, 0 100%, 0 0,
+                      ${marquee.x}px ${marquee.y}px,
+                      ${marquee.x}px ${marquee.y + marquee.h}px,
+                      ${marquee.x + marquee.w}px ${marquee.y + marquee.h}px,
+                      ${marquee.x + marquee.w}px ${marquee.y}px,
+                      ${marquee.x}px ${marquee.y}px
+                    )`,
+                    pointerEvents: "none",
+                  }} />
+                  <div style={{
+                    position: "absolute",
+                    left: marquee.x, top: marquee.y,
+                    width: marquee.w, height: marquee.h,
+                    border: `2px dashed ${T.tealLight}`,
+                    boxShadow: "0 0 0 1px rgba(0,123,127,0.3), 0 8px 24px rgba(0,123,127,0.25)",
+                    background: "rgba(0,123,127,0.05)",
+                    pointerEvents: "none",
+                  }}>
+                    {!dragging && hasAnyMarquee && (
+                      <div style={{
+                        position: "absolute", top: -18, left: 0,
+                        fontFamily: T.mono, fontSize: 9,
+                        color: marqueeTooSmall ? "#F5A623" : T.teal,
+                        padding: "1px 5px",
+                        background: marqueeTooSmall ? "rgba(245,166,35,0.15)" : "rgba(0,123,127,0.15)",
+                        borderRadius: 3,
+                      }}>
+                        {marqueeTooSmall
+                          ? `Too small — need ≥${MIN_MARQUEE}×${MIN_MARQUEE}`
+                          : `${Math.round(marquee.w)} × ${Math.round(marquee.h)}`}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button onClick={() => { screen.reset(); setStage("choose"); }} style={{
+                flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Back</button>
+              <button onClick={() => { setMarquee({ x: 0, y: 0, w: 0, h: 0 }); }} style={{
+                padding: "9px 12px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Retry</button>
+              <button
+                disabled={!marqueeDone}
+                onClick={handleExtract}
+                title={
+                  marqueeDone ? undefined :
+                  marqueeTooSmall ? `Region is too small — drag at least ${MIN_MARQUEE}×${MIN_MARQUEE}px` :
+                  "Drag a region on the captured image to select"
+                }
+                style={{
+                  flex: 2, padding: "9px 12px",
+                  background: marqueeDone ? "linear-gradient(135deg, #007B7F, #004D50)" : "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+                  fontFamily: T.display, fontWeight: 700, fontSize: 11,
+                  color: marqueeDone ? "#fff" : "rgba(255,255,255,0.3)",
+                  cursor: marqueeDone ? "pointer" : "not-allowed",
+                  letterSpacing: "0.04em", textTransform: "uppercase",
+                }}
+              >✦ Extract</button>
+            </div>
+          </div>
+        )}
+
+        {stage === "paste" && (
+          <div style={{ padding: 14 }}>
+            <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.45)", marginBottom: 8 }}>
+              Paste lead info from your CRM, email, or notes. AI will parse the fields.
+            </div>
+            <textarea
+              autoFocus
+              value={pasteText}
+              onChange={e => setPasteText(e.target.value)}
+              placeholder="Paste lead information here…"
+              rows={6}
+              style={{
+                width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 8, padding: "8px 10px", color: "#fff", outline: "none", resize: "vertical",
+                fontFamily: T.body, fontSize: 12, lineHeight: 1.5,
+              }}
+            />
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <button onClick={() => setStage("choose")} style={{
                 flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.04)",
                 border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
                 fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
               }}>Back</button>
-              <button disabled={!marqueeDone} onClick={() => setStage("extracting")} style={{
+              <button disabled={!pasteText.trim()} onClick={handlePasteExtract} style={{
                 flex: 2, padding: "9px 12px",
-                background: marqueeDone ? "linear-gradient(135deg, #007B7F, #004D50)" : "rgba(255,255,255,0.04)",
+                background: pasteText.trim() ? "linear-gradient(135deg, #007B7F, #004D50)" : "rgba(255,255,255,0.04)",
                 border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
                 fontFamily: T.display, fontWeight: 700, fontSize: 11,
-                color: marqueeDone ? "#fff" : "rgba(255,255,255,0.3)",
-                cursor: marqueeDone ? "pointer" : "not-allowed",
+                color: pasteText.trim() ? "#fff" : "rgba(255,255,255,0.3)",
+                cursor: pasteText.trim() ? "pointer" : "not-allowed",
                 letterSpacing: "0.04em", textTransform: "uppercase",
-              }}>{marqueeDone ? "✓ Capture region" : "Drawing…"}</button>
+              }}>✦ Extract from text</button>
             </div>
           </div>
         )}
@@ -437,15 +784,45 @@ function CaptureLeadModal({ onCommit, onClose }) {
         {stage === "extracting" && (
           <div style={{ padding: 24, textAlign: "center" }}>
             <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 10 }}>
-              Claude Vision · parsing {source === "region" ? "selected region" : "screen capture"}…
+              Claude Vision · extracting lead fields…
             </div>
             <div style={{ height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden", marginBottom: 12 }}>
-              <div style={{ height: "100%", width: `${progress}%`, background: `linear-gradient(90deg, ${T.teal}, #34C77B)`, transition: "width 0.2s ease" }} />
+              <div style={{
+                height: "100%", width: "60%",
+                background: `linear-gradient(90deg, ${T.teal}, #34C77B)`,
+                animation: "extractPulse 1.5s ease-in-out infinite",
+              }} />
             </div>
             <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.35)" }}>
-              {progress < 30 && "Locating fields…"}
-              {progress >= 30 && progress < 70 && "Extracting name, DOB, ZIP, coverage…"}
-              {progress >= 70 && "Scoring confidence…"}
+              Sending to API…
+            </div>
+            <style>{`@keyframes extractPulse { 0%,100% { width: 30%; } 50% { width: 85%; } }`}</style>
+          </div>
+        )}
+
+        {stage === "error" && (
+          <div style={{ padding: 20, textAlign: "center" }}>
+            <div style={{
+              fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "#F5A623", marginBottom: 8,
+            }}>
+              {error}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <button onClick={() => { screen.reset(); setStage("choose"); }} style={{
+                padding: "9px 16px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Try again</button>
+              <button onClick={() => startExtract("paste")} style={{
+                padding: "9px 16px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Paste instead</button>
+              <button onClick={() => startExtract("manual")} style={{
+                padding: "9px 16px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Enter manually</button>
             </div>
           </div>
         )}
@@ -462,10 +839,15 @@ function CaptureLeadModal({ onCommit, onClose }) {
                   borderRadius: 8, padding: "8px 10px",
                   display: "flex", alignItems: "center", gap: 8,
                 }}>
-                  <div style={{ fontFamily: T.display, fontWeight: 600, fontSize: 9, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", width: 92 }}>{k}</div>
+                  <div style={{ fontFamily: T.display, fontWeight: 600, fontSize: 9, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", width: 92 }}>
+                    {fieldLabels[k] || k}
+                  </div>
                   <input
-                    value={f.v}
-                    onChange={e => setExtracted(prev => ({ ...prev, [k]: { ...f, v: e.target.value, pill: e.target.value ? "verified" : "low" } }))}
+                    value={typeof f.v === "object" ? JSON.stringify(f.v) : (f.v || "")}
+                    onChange={e => setExtracted(prev => ({
+                      ...prev,
+                      [k]: { ...f, v: e.target.value, confidence: e.target.value ? (f.confidence === "low" ? "medium" : f.confidence) : "low" }
+                    }))}
                     placeholder="—"
                     style={{
                       flex: 1, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
@@ -473,7 +855,7 @@ function CaptureLeadModal({ onCommit, onClose }) {
                       fontFamily: T.body, fontSize: 12,
                     }}
                   />
-                  <ConfidencePill level={f.pill} />
+                  <ConfidencePill level={f.confidence || f.pill || "medium"} />
                 </div>
               ))}
             </div>
@@ -498,26 +880,163 @@ function CaptureLeadModal({ onCommit, onClose }) {
   );
 }
 
+// ─── Editable cell (P1): click-to-edit a lead field in place ───
+//
+// `field.editKind` decides how the string is split/parsed back into
+// individual LeadContext fields when the user commits:
+//   - "name":     "First Last…" → firstName + lastName
+//   - "address":  "City, ST 12345" → address.{city,state,zip}
+//   - "dob" | "phone" | "coverage": single-field update
+// Esc cancels; Enter or blur-outside commits.
+function EditableLeadCell({ field, editable, highlighted, scaledFont, onCommit }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  const begin = () => {
+    if (!editable) return;
+    setDraft(field.v || "");
+    setEditing(true);
+  };
+
+  const commit = () => {
+    setEditing(false);
+    const trimmed = (draft || "").trim();
+    const current = (field.v || "").toString().trim();
+    if (trimmed && trimmed !== current) onCommit(trimmed);
+  };
+
+  const cancel = () => {
+    setDraft("");
+    setEditing(false);
+  };
+
+  return (
+    <div
+      style={{
+        gridColumn: field.wide ? "span 2" : "span 1",
+        background: "rgba(255,255,255,0.025)",
+        border: `1px solid ${highlighted ? "rgba(26,158,162,0.85)" : "rgba(255,255,255,0.04)"}`,
+        borderRadius: 6,
+        padding: "4px 7px",
+        cursor: editable && !editing ? "text" : "default",
+        transition: "border-color 220ms ease, box-shadow 220ms ease",
+        boxShadow: highlighted ? "0 0 0 2px rgba(26,158,162,0.35), 0 0 18px rgba(26,158,162,0.35)" : "none",
+      }}
+      onClick={() => { if (!editing) begin(); }}
+      title={editable ? "Click to edit" : undefined}
+    >
+      <div style={{
+        fontFamily: T.display, fontWeight: 600, fontSize: 8,
+        letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)",
+      }}>
+        {field.k}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, minHeight: 16 }}>
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); commit(); }
+              else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              flex: 1, minWidth: 0,
+              background: "rgba(0,0,0,0.25)", border: "1px solid rgba(26,158,162,0.5)",
+              borderRadius: 4, padding: "2px 5px", color: "#fff", outline: "none",
+              fontFamily: T.body, fontSize: scaledFont(11), lineHeight: 1.35,
+            }}
+          />
+        ) : (
+          <span style={{
+            fontFamily: T.body, fontSize: scaledFont(11),
+            color: "rgba(255,255,255,0.9)", flex: 1, lineHeight: 1.35,
+          }}>
+            {field.v || "—"}
+          </span>
+        )}
+        <ConfidencePill level={field.pill} />
+      </div>
+    </div>
+  );
+}
+
 function LeadContextPanel({ scaledFont = (x) => x }) {
+  const { lead: ctxLead, highlightedField, actions } = useLead();
   const [activeId, setActiveId] = useState("maria");
-  const [custom, setCustom] = useState(null); // a captured lead, replaces the catalog entry
   const [showSwitch, setShowSwitch] = useState(false);
   const [showCapture, setShowCapture] = useState(false);
 
-  const active = custom && custom.id === activeId ? custom : MOCK_LEADS[activeId];
+  // If we have a real lead from context, display it; otherwise fall back to mock data
+  const hasRealLead = ctxLead && ctxLead.fields;
+
+  // Convert context lead fields to the display format the panel expects.
+  // Each cell carries a `matches` array that lists the underlying fieldName(s)
+  // it represents — used to decide whether the highlight ring should fire when
+  // an AI source pill hovers a field name.
+  const active = hasRealLead ? {
+    id: ctxLead.id,
+    source: `Captured · ${ctxLead.source}`,
+    fields: [
+      ctxLead.fields.firstName && {
+        k: "Name",
+        v: `${ctxLead.fields.firstName?.v || ""} ${ctxLead.fields.lastName?.v || ""}`.trim(),
+        pill: ctxLead.fields.firstName?.confidence || "medium",
+        matches: ["firstName", "lastName", "name"],
+        editKind: "name",
+      },
+      ctxLead.fields.dob && {
+        k: "DOB",
+        v: ctxLead.fields.dob.v,
+        pill: ctxLead.fields.dob.confidence,
+        matches: ["dob"],
+        editKind: "dob",
+      },
+      ctxLead.fields.phone && {
+        k: "Phone",
+        v: ctxLead.fields.phone.v,
+        pill: ctxLead.fields.phone.confidence,
+        matches: ["phone"],
+        editKind: "phone",
+      },
+      ctxLead.fields.address && {
+        k: "Address · ZIP",
+        v: typeof ctxLead.fields.address.v === "object"
+          ? `${ctxLead.fields.address.v.city || ""}, ${ctxLead.fields.address.v.state || ""} ${ctxLead.fields.address.v.zip || ""}`.trim()
+          : ctxLead.fields.address.v,
+        pill: ctxLead.fields.address.confidence,
+        wide: true,
+        matches: ["address", "zip", "state", "city"],
+        editKind: "address",
+      },
+      ctxLead.fields.coverage && {
+        k: "Coverage",
+        v: ctxLead.fields.coverage.v,
+        pill: ctxLead.fields.coverage.confidence,
+        matches: ["coverage"],
+        editKind: "coverage",
+      },
+    ].filter(Boolean),
+  } : MOCK_LEADS[activeId];
+
   const fields = active.fields;
   const source = active.source;
 
   const handleCommitCapture = (extracted) => {
-    const id = "captured_" + Date.now();
-    const newLead = {
-      id, source: "Captured · Claude Vision",
-      fields: Object.entries(extracted).map(([k, f], i) => ({
-        k, v: f.v || "—", pill: f.pill, wide: k === "Address · ZIP",
-      })),
-    };
-    setCustom(newLead);
-    setActiveId(id);
+    // Build a real LeadContext from the extracted fields and dispatch to global state
+    const newLead = buildLeadFromExtraction(extracted, "vision");
+    actions.capture(newLead);
     setShowCapture(false);
   };
 
@@ -557,17 +1076,17 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px 8px" }}>
         {fields.map((f, i) => (
-          <div key={i} style={{
-            gridColumn: f.wide ? "span 2" : "span 1",
-            background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.04)",
-            borderRadius: 6, padding: "4px 7px",
-          }}>
-            <div style={{ fontFamily: T.display, fontWeight: 600, fontSize: 8, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)" }}>{f.k}</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4, minHeight: 16 }}>
-              <span style={{ fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.9)", flex: 1, lineHeight: 1.35 }}>{f.v || "—"}</span>
-              <ConfidencePill level={f.pill} />
-            </div>
-          </div>
+          <EditableLeadCell
+            key={i}
+            field={f}
+            editable={hasRealLead}
+            highlighted={hasRealLead && f.matches && highlightedField && f.matches.includes(highlightedField)}
+            scaledFont={scaledFont}
+            onCommit={(nextValue) => {
+              if (!hasRealLead) return;
+              commitLeadEdit(ctxLead, f.editKind, nextValue, actions.updateField);
+            }}
+          />
         ))}
       </div>
 
@@ -588,7 +1107,7 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
   );
 }
 
-function ComplianceHub({ peclItems, compact = false }) {
+function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
   const peclDone = peclItems.filter(i => i.done).length;
   const mspRow = peclItems.find(i => i.id === "msp");
   const mspCovered = mspRow?.done;
@@ -682,30 +1201,57 @@ function ComplianceHub({ peclItems, compact = false }) {
           {peclItems.map(item => {
             const r = item.done ? "done" : risk[item.id] || "rec";
             const isPending = !item.done && r === "req";
+            const isAuto = item.done && item.coveredBy === "auto-transcript";
+            const isOverridden = item.coveredBy === "manual-override";
+            const isManual = item.done && item.coveredBy === "manual";
+            const interactive = typeof onTogglePecl === "function" && (isAuto || isManual || isOverridden || (!item.done && !isPending && false) || (!item.done));
+            // Tag text + colors driven by the row's effective state.
+            let tagText, tagBg, tagColor;
+            if (isAuto)            { tagText = "auto";     tagBg = "rgba(0,123,127,0.18)";  tagColor = "#7fd9dc"; }
+            else if (isManual)     { tagText = "manual";   tagBg = "rgba(52,199,123,0.18)"; tagColor = "#34C77B"; }
+            else if (isOverridden) { tagText = "override"; tagBg = "rgba(245,166,35,0.18)"; tagColor = "#F5A623"; }
+            else if (item.done)    { tagText = "done";     tagBg = "rgba(52,199,123,0.12)"; tagColor = "#34C77B"; }
+            else if (r === "req")  { tagText = riskLabel[r] || "rec"; tagBg = "rgba(231,76,60,0.15)"; tagColor = "#ff8a7b"; }
+            else                   { tagText = riskLabel[r] || "rec"; tagBg = "rgba(245,166,35,0.12)"; tagColor = "#F5A623"; }
             return (
-              <div key={item.id} style={{
-                display: "flex", alignItems: "center", gap: 7,
-                padding: "4px 7px", borderRadius: 5,
-                background: item.done ? "rgba(52,199,123,0.04)" : (isPending ? "rgba(231,76,60,0.05)" : "transparent"),
-                fontFamily: T.body, fontSize: 11,
-              }}>
+              <div
+                key={item.id}
+                role={interactive ? "button" : undefined}
+                tabIndex={interactive ? 0 : undefined}
+                onClick={interactive ? () => onTogglePecl(item.id) : undefined}
+                onKeyDown={interactive ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTogglePecl(item.id); } } : undefined}
+                title={
+                  interactive
+                    ? (isAuto ? "Click to mark as not yet covered" :
+                       isManual ? "Click to undo manual mark" :
+                       isOverridden ? "Click to revert to auto-coverage" :
+                       "Click to mark covered manually")
+                    : undefined
+                }
+                style={{
+                  display: "flex", alignItems: "center", gap: 7,
+                  padding: "4px 7px", borderRadius: 5,
+                  background: isOverridden ? "rgba(245,166,35,0.07)" : (item.done ? "rgba(52,199,123,0.04)" : (isPending ? "rgba(231,76,60,0.05)" : "transparent")),
+                  fontFamily: T.body, fontSize: 11,
+                  cursor: interactive ? "pointer" : "default",
+                }}
+              >
                 <span style={{
                   width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-                  background: dotColor[r],
-                  boxShadow: r === "req" ? "0 0 6px rgba(231,76,60,0.5)" : (r === "done" ? "0 0 6px rgba(52,199,123,0.5)" : "none"),
+                  background: isOverridden ? "#F5A623" : dotColor[r],
+                  boxShadow: isOverridden ? "0 0 6px rgba(245,166,35,0.55)" : (r === "req" ? "0 0 6px rgba(231,76,60,0.5)" : (r === "done" ? "0 0 6px rgba(52,199,123,0.5)" : "none")),
                 }} />
                 <span style={{
                   flex: 1,
-                  color: item.done ? "rgba(255,255,255,0.55)" : (isPending ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.7)"),
+                  color: isOverridden ? "rgba(255,255,255,0.85)" : (item.done ? "rgba(255,255,255,0.55)" : (isPending ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.7)")),
                   textDecoration: item.done ? "line-through" : "none",
                   textDecorationColor: "rgba(52,199,123,0.4)",
                 }}>{item.label}</span>
                 <span style={{
-                  fontFamily: T.display, fontWeight: 700, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
-                  padding: "1px 4px", borderRadius: 3,
-                  background: item.done ? "rgba(52,199,123,0.12)" : (r === "req" ? "rgba(231,76,60,0.15)" : "rgba(245,166,35,0.12)"),
-                  color: item.done ? "#34C77B" : (r === "req" ? "#ff8a7b" : "#F5A623"),
-                }}>{item.done ? "done" : riskLabel[r] || "rec"}</span>
+                  fontFamily: T.display, fontWeight: 800, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
+                  padding: "1px 5px", borderRadius: 3,
+                  background: tagBg, color: tagColor,
+                }}>{tagText}</span>
               </div>
             );
           })}
@@ -715,16 +1261,29 @@ function ComplianceHub({ peclItems, compact = false }) {
   );
 }
 
-function MspInlineBadge({ covered }) {
+function MspInlineBadge({ covered, onClick }) {
+  const interactive = typeof onClick === "function" && !covered;
+  const handleClick = (e) => {
+    if (!interactive) return;
+    e.stopPropagation();
+    onClick();
+  };
   return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 3,
-      padding: "1px 5px", borderRadius: 3, marginLeft: 4,
-      background: covered ? "#34C77B" : "#F5A623",
-      color: covered ? "#013014" : "#1a1200",
-      fontFamily: T.display, fontWeight: 800, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
-      cursor: "pointer",
-    }}>
+    <button
+      type="button"
+      data-no-drag="true"
+      onClick={handleClick}
+      title={covered ? "MSP covered" : (interactive ? "Insert MSP script into Say this" : "MSP")}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 3,
+        padding: "1px 5px", borderRadius: 3, marginLeft: 4,
+        background: covered ? "#34C77B" : "#F5A623",
+        color: covered ? "#013014" : "#1a1200",
+        fontFamily: T.display, fontWeight: 800, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
+        border: "none",
+        cursor: interactive ? "pointer" : "default",
+      }}
+    >
       <span style={{
         width: 9, height: 9, borderRadius: "50%",
         background: covered ? "#013014" : "#1a1200",
@@ -732,21 +1291,37 @@ function MspInlineBadge({ covered }) {
         fontSize: 7, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800,
       }}>{covered ? "✓" : "!"}</span>
       {covered ? "MSP covered" : "MSP"}
-    </span>
+    </button>
   );
 }
 
 function SourcesRow({ sources }) {
+  const { actions } = useLead();
   if (!sources || sources.length === 0) return null;
+
+  // Normalize: accept plain strings (legacy) or { label, field } objects.
+  const items = sources.map((s) =>
+    typeof s === "string" ? { label: s, field: null } : s
+  );
+
   return (
     <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
-      {sources.map((s, i) => (
-        <span key={i} style={{
-          fontFamily: T.mono, fontSize: 8, letterSpacing: "0.04em", textTransform: "uppercase",
-          padding: "1px 5px", borderRadius: 6,
-          background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.45)",
-          border: "1px solid rgba(255,255,255,0.08)",
-        }}>{s}</span>
+      {items.map((s, i) => (
+        <span
+          key={i}
+          onMouseEnter={() => { if (s.field) actions.highlightField(s.field); }}
+          onMouseLeave={() => actions.highlightField(null)}
+          style={{
+            fontFamily: T.mono, fontSize: 8, letterSpacing: "0.04em", textTransform: "uppercase",
+            padding: "1px 5px", borderRadius: 6,
+            background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.45)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            cursor: s.field ? "pointer" : "default",
+            transition: "background 160ms ease, color 160ms ease",
+          }}
+        >
+          {s.label}
+        </span>
       ))}
     </div>
   );
@@ -796,7 +1371,7 @@ function MacDock() {
   );
 }
 
-function Five9Window() {
+function Five9Window({ callEnded = false, onEndCall }) {
   return (
     <div style={{ position: "absolute", top: 50, left: 40, width: 680, borderRadius: 8, background: "#1a1a2e", boxShadow: "0 20px 60px rgba(0,0,0,0.4)", overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", height: 28, padding: "0 10px", background: "#2D2D2D", borderBottom: "1px solid #3a3a3a", borderRadius: "8px 8px 0 0" }}>
@@ -805,12 +1380,12 @@ function Five9Window() {
           <div style={{ width: 12, height: 12, borderRadius: 6, background: "#FFBD2E" }} />
           <div style={{ width: 12, height: 12, borderRadius: 6, background: "#28C840" }} />
         </div>
-        <div style={{ flex: 1, textAlign: "center", fontSize: 12, fontWeight: 500, color: "#aaa", fontFamily: "-apple-system, sans-serif" }}>Five9 Agent Desktop — Active Call</div>
+        <div style={{ flex: 1, textAlign: "center", fontSize: 12, fontWeight: 500, color: "#aaa", fontFamily: "-apple-system, sans-serif" }}>Five9 Agent Desktop — {callEnded ? "Call Ended" : "Active Call"}</div>
       </div>
       <div style={{ padding: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-          <div style={{ width: 10, height: 10, borderRadius: 5, background: "#34C77B", boxShadow: "0 0 8px rgba(52,199,123,0.5)" }} />
-          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16, color: "#34C77B" }}>CONNECTED</span>
+          <div style={{ width: 10, height: 10, borderRadius: 5, background: callEnded ? "#E74C3C" : "#34C77B", boxShadow: callEnded ? "0 0 8px rgba(231,76,60,0.5)" : "0 0 8px rgba(52,199,123,0.5)" }} />
+          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16, color: callEnded ? "#ff8a7b" : "#34C77B" }}>{callEnded ? "CALL ENDED" : "CONNECTED"}</span>
           <span style={{ fontFamily: T.mono, fontSize: 14, color: T.dusk }}>08:12</span>
           <span style={{ fontFamily: T.mono, fontSize: 13, color: "#666", marginLeft: "auto" }}>Campaign: AEP_MAPD_FL</span>
         </div>
@@ -826,9 +1401,20 @@ function Five9Window() {
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
           {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"],["End Call","📕"]].map(([l,ic]) => (
-            <button key={l} style={{ background: l==="End Call" ? "rgba(231,76,60,0.3)" : "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "10px 16px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+            <button
+              key={l}
+              onClick={l === "End Call" ? onEndCall : undefined}
+              disabled={l === "End Call" && callEnded}
+              style={{
+                background: l === "End Call" ? (callEnded ? "rgba(231,76,60,0.12)" : "rgba(231,76,60,0.3)") : "rgba(255,255,255,0.1)",
+                border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "10px 16px",
+                cursor: l === "End Call" && callEnded ? "default" : "pointer",
+                opacity: l === "End Call" && callEnded ? 0.55 : 1,
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+              }}
+            >
               <span style={{ fontSize: 18 }}>{ic}</span>
-              <span style={{ fontFamily: T.display, fontSize: 10, color: "#999" }}>{l}</span>
+              <span style={{ fontFamily: T.display, fontSize: 10, color: "#999" }}>{l === "End Call" && callEnded ? "Ended" : l}</span>
             </button>
           ))}
         </div>
@@ -841,7 +1427,15 @@ function Five9Window() {
 //  SHARED: AI Response Card
 // ═══════════════════════════════════════
 
-function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn }) {
+function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsertScript, insertedScripts, mspCovered }) {
+  // Augment the visible response copy when the agent has clicked a
+  // compliance pill (tier 4). Tracks which scripts were inserted so the
+  // card can show a small "+ MSP script" attribution under the body.
+  const { sayThis: augmented, inserted } = applyInsertedScripts(
+    resp.response,
+    insertedScripts
+  );
+  const hasInsertions = inserted.length > 0;
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -857,14 +1451,29 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn }) {
         <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>Context: {resp.context.audio}</span>
       </div>
       <div style={{ padding: "10px 12px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "12px 12px 12px 4px" }}>
-        <div style={{ fontFamily: T.body, fontSize: scaledFont(13), color: `rgba(255,255,255,${Math.min(opacity+0.1,0.95)})`, lineHeight: 1.55 }}>{resp.response}</div>
+        <div style={{ fontFamily: T.body, fontSize: scaledFont(13), color: `rgba(255,255,255,${Math.min(opacity+0.1,0.95)})`, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{augmented}</div>
+        {hasInsertions && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+            {inserted.map((ins) => (
+              <span key={ins.id} style={{
+                display: "inline-flex", alignItems: "center", gap: 3,
+                padding: "1px 5px", borderRadius: 3,
+                background: "rgba(0,123,127,0.12)", color: T.teal,
+                fontFamily: T.display, fontWeight: 700, fontSize: 8, letterSpacing: "0.06em", textTransform: "uppercase",
+              }}>+ {ins.label} script</span>
+            ))}
+          </div>
+        )}
         {resp.plans && <div style={{ marginTop: 8 }}>
           {resp.plans.map((p, j) => (
             <div key={j} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 8px", marginBottom: 3, background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.03)" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <div style={{ fontFamily: T.display, fontSize: scaledFont(11), fontWeight: 600, color: T.white }}>{p.name}</div>
-                  <MspInlineBadge covered={p.mspCovered !== false} />
+                  <MspInlineBadge
+                    covered={mspCovered === true}
+                    onClick={onInsertScript ? () => onInsertScript("msp") : undefined}
+                  />
                 </div>
                 <div style={{ fontFamily: T.mono, fontSize: scaledFont(9), color: "rgba(255,255,255,0.3)" }}>{p.tier} · PA: {p.pa} · {p.stars}</div>
               </div>
@@ -902,19 +1511,86 @@ function MobileLayout() {
   const [inputVal, setInputVal] = useState("");
   const [audioOn, setAudioOn] = useState(true);
   const [screenOn, setScreenOn] = useState(true);
+  const [callEnded, setCallEnded] = useState(false);
   const [visibleTranscript, setVisibleTranscript] = useState(6);
   const [shownResponses, setShownResponses] = useState(1);
   const [tick, setTick] = useState(0);
+  // Tier 4: PECL items the agent has overridden by clicking a row.
+  // Map<peclId, "manual-done"|"manual-undone">. See togglePeclOverride.
+  const [peclOverrides, setPeclOverrides] = useState(() => new Map());
+  // Tier 4: PECL ids whose canonical script the agent has clicked into
+  // the active card's "Say this". Reset whenever the active card changes.
+  const [insertedScripts, setInsertedScripts] = useState(() => new Set());
   const opacity = 0.88;
   const scaledFont = (base) => base;
+
+  // Live audio pipeline. When VITE_BACKEND_WSS_URL isn't set the hook is a
+  // no-op and `transcripts` stays empty — renderers fall back to the demo.
+  // Ending the call forces enabled→false, which triggers the useLiveAudio
+  // cleanup (closes WSS intentionally + releases the mic track).
+  const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn && !callEnded });
+  useAudioErrorToasts(liveAudio);
+  const { lead: ctxLead } = useLead();
+  useLeadContextPush(liveAudio, ctxLead);
+  const liveLines = mapLiveTranscripts(liveAudio.transcripts);
+  const usingLive = liveLines.length > 0;
+  const renderedTranscript = usingLive
+    ? liveLines
+    : transcriptLines.slice(0, visibleTranscript);
+  const liveCards = liveSuggestionsToCards(liveAudio.suggestions);
 
   useEffect(() => {
     const iv = setInterval(() => setTick(t => t + 1), 300);
     return () => clearInterval(iv);
   }, []);
 
-  const peclItems = DEFAULT_PECL_ITEMS;
+  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
   const peclDone = peclItems.filter(i => i.done).length;
+  const displayResponses = liveCards.length > 0
+    ? liveCards
+    : aiResponses.slice(0, shownResponses);
+
+  // The "active card" is the most recent one displayed — that's what an
+  // MSP-script click attaches to. When the active card identity changes
+  // we clear the inserted-scripts set so stale insertions don't leak.
+  const activeCardKey = displayResponses.length > 0
+    ? (displayResponses[displayResponses.length - 1].id || displayResponses[displayResponses.length - 1].trigger || displayResponses.length)
+    : null;
+  const lastCardKeyRef = useRef(activeCardKey);
+  useEffect(() => {
+    if (lastCardKeyRef.current !== activeCardKey) {
+      lastCardKeyRef.current = activeCardKey;
+      setInsertedScripts(new Set());
+    }
+  }, [activeCardKey]);
+
+  const handleInsertScript = useCallback((id) => {
+    if (!id || !COMPLIANCE_SCRIPTS[id]) return;
+    setInsertedScripts((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handlePeclToggle = useCallback((id) => {
+    const baseItem = DEFAULT_PECL_ITEMS.find((it) => it.id === id);
+    if (!baseItem) return;
+    const autoCovered = liveAudio.autoPecl?.has?.(id) === true;
+    setPeclOverrides((prev) =>
+      togglePeclOverride(prev, id, { baseDone: baseItem.done, autoCovered })
+    );
+  }, [liveAudio.autoPecl]);
+
+  const handleEndCall = useCallback(() => {
+    setCallEnded(true);
+    setAudioOn(false);
+  }, []);
+  const handleResumeCall = useCallback(() => {
+    setCallEnded(false);
+    setAudioOn(true);
+  }, []);
 
   const handleAskAI = () => {
     if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
@@ -954,19 +1630,20 @@ function MobileLayout() {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
         {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"],["End Call","📕"]].map(([l,ic]) => (
-          <button key={l} style={{
-            background: l==="End Call" ? "rgba(231,76,60,0.3)" : "rgba(255,255,255,0.08)",
+          <button key={l} onClick={l === "End Call" ? handleEndCall : undefined} disabled={l === "End Call" && callEnded} style={{
+            background: l==="End Call" ? (callEnded ? "rgba(231,76,60,0.12)" : "rgba(231,76,60,0.3)") : "rgba(255,255,255,0.08)",
             border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10,
-            padding: "12px 8px", cursor: "pointer",
+            padding: "12px 8px", cursor: l === "End Call" && callEnded ? "default" : "pointer",
+            opacity: l === "End Call" && callEnded ? 0.55 : 1,
             display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
           }}>
             <span style={{ fontSize: 22 }}>{ic}</span>
-            <span style={{ fontFamily: T.display, fontSize: 11, color: "#999" }}>{l}</span>
+            <span style={{ fontFamily: T.display, fontSize: 11, color: "#999" }}>{l === "End Call" && callEnded ? "Ended" : l}</span>
           </button>
         ))}
       </div>
       <div style={{ marginTop: 16 }}>
-        <ComplianceHub peclItems={peclItems} />
+        <ComplianceHub peclItems={peclItems} onTogglePecl={handlePeclToggle} />
       </div>
     </div>
   );
@@ -974,10 +1651,23 @@ function MobileLayout() {
   const renderCopilot = () => (
     <div style={{ padding: 16 }}>
       <LeadContextPanel />
-      {aiResponses.slice(0, shownResponses).map((resp, i) => (
-        <AIResponseCard key={i} resp={resp} scaledFont={scaledFont} opacity={opacity} audioOn={audioOn} screenOn={screenOn} />
-      ))}
-      {shownResponses < aiResponses.length && (
+      {displayResponses.map((resp, i) => {
+        const isActive = i === displayResponses.length - 1;
+        return (
+        <AIResponseCard
+          key={i}
+          resp={resp}
+          scaledFont={scaledFont}
+          opacity={opacity}
+          audioOn={audioOn}
+          screenOn={screenOn}
+          onInsertScript={isActive ? handleInsertScript : undefined}
+          insertedScripts={isActive ? insertedScripts : null}
+          mspCovered={peclItems.find((it) => it.id === "msp")?.done === true}
+        />
+        );
+      })}
+      {liveCards.length === 0 && shownResponses < aiResponses.length && (
         <div style={{ textAlign: "center", padding: "12px 0" }}>
           <span style={{ fontFamily: T.display, fontSize: 11, color: "rgba(255,255,255,0.2)" }}>
             Tap "Ask AI" for next response...
@@ -992,9 +1682,12 @@ function MobileLayout() {
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
         <Volume2 size={12} color="rgba(255,255,255,0.2)" />
         <span style={{ fontFamily: T.display, fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Live Transcript</span>
+        {callEnded && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#ff8a7b", background: "rgba(231,76,60,0.12)", padding: "1px 5px", borderRadius: 3 }}>● ended</span>}
+        {!callEnded && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
+        {!callEnded && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
         {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)", marginLeft: "auto" }}>Five9 — Maria Garcia</span>}
       </div>
-      {transcriptLines.slice(0, visibleTranscript).map((line, i) => (
+      {renderedTranscript.map((line, i) => (
         <div key={i} style={{ display: "flex", gap: 8, padding: "6px 0", alignItems: "flex-start", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
           <span style={{ fontFamily: T.mono, fontSize: 10, color: "rgba(255,255,255,0.15)", minWidth: 32 }}>{line.time}</span>
           <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, minWidth: 40, color: line.speaker === "client" ? T.coral : "rgba(255,255,255,0.3)" }}>
@@ -1062,15 +1755,26 @@ function MobileLayout() {
   // ─── Context bar (shown in tabs + split modes) ───
   const ContextBar = () => (
     <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "rgba(0,40,42,0.5)", borderBottom: "1px solid rgba(0,123,127,0.08)", flexShrink: 0, flexWrap: "wrap" }}>
-      <button onClick={() => setAudioOn(!audioOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
-        {audioOn ? <Volume2 size={12} color="#34C77B" /> : <MicOff size={12} color="rgba(255,255,255,0.3)" />}
-        <AudioWave active={audioOn} color="#34C77B" bars={4} />
-        <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: audioOn ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn ? "Listening" : "Muted"}</span>
+      <button onClick={() => !callEnded && setAudioOn(!audioOn)} disabled={callEnded} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: callEnded ? "rgba(255,255,255,0.03)" : (audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)"), border: `1px solid ${callEnded ? "rgba(255,255,255,0.06)" : (audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)")}`, borderRadius: 6, cursor: callEnded ? "default" : "pointer", opacity: callEnded ? 0.5 : 1 }}>
+        {audioOn && !callEnded ? <Volume2 size={12} color="#34C77B" /> : <MicOff size={12} color="rgba(255,255,255,0.3)" />}
+        <AudioWave active={audioOn && !callEnded} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
+        <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: audioOn && !callEnded ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn && !callEnded ? (liveAudio.live ? "Listening" : BACKEND_WSS_URL ? "Connecting" : "Listening") : "Muted"}</span>
       </button>
       <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? "rgba(0,123,127,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
         <Monitor size={12} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
         <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: screenOn ? T.teal : "rgba(255,255,255,0.3)" }}>{screenOn ? "Screen On" : "Screen Off"}</span>
       </button>
+      {callEnded ? (
+        <button onClick={handleResumeCall} title="Resume the call" style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "rgba(52,199,123,0.12)", border: "1px solid rgba(52,199,123,0.35)", borderRadius: 6, cursor: "pointer" }}>
+          <Phone size={11} color="#34C77B" />
+          <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 700, color: "#34C77B" }}>Resume</span>
+        </button>
+      ) : (
+        <button onClick={handleEndCall} title="End call — stops mic + transcription" style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "rgba(231,76,60,0.12)", border: "1px solid rgba(231,76,60,0.35)", borderRadius: 6, cursor: "pointer" }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: "#E74C3C" }} />
+          <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 700, color: "#ff8a7b" }}>End Call</span>
+        </button>
+      )}
       <div style={{ flex: 1 }} />
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(245,166,35,0.08)", borderRadius: 6 }}>
         <AlertTriangle size={10} color="#F5A623" />
@@ -1215,7 +1919,7 @@ function MobileLayout() {
 //  DESKTOP: MediCopilot Overlay (original)
 // ═══════════════════════════════════════
 
-function MediCopilotOverlay({ mode, setMode, opacity }) {
+function MediCopilotOverlay({ mode, setMode, opacity, callEnded = false, onEndCall, onResumeCall }) {
   const [inputVal, setInputVal] = useState("");
   const [audioOn, setAudioOn] = useState(true);
   const [screenOn, setScreenOn] = useState(true);
@@ -1230,6 +1934,37 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const [splitPct, setSplitPct] = useState(50);
   const splitContainerRef = useRef(null);
   const splitDragging = useRef(false);
+  // Tier 4 — see MobileLayout for the matching state.
+  const [peclOverrides, setPeclOverrides] = useState(() => new Map());
+  const [insertedScripts, setInsertedScripts] = useState(() => new Set());
+  // Call elapsed timer feeds the inline MSP header badge — flips amber
+  // after 10min without coverage. Defaulted to 0 (info tone) on first
+  // render; an interval below ticks the value forward.
+  const [callStartedAt] = useState(() => Date.now());
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setElapsedMs(Date.now() - callStartedAt);
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [callStartedAt]);
+
+  // Live audio pipeline (see MobileLayout for the matching wiring).
+  // callEnded → forces enabled=false → useLiveAudio cleanup releases the
+  // mic track and intentionally closes the WSS (no reconnect).
+  const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn && !callEnded });
+  useAudioErrorToasts(liveAudio);
+  const { lead: ctxLead } = useLead();
+  useLeadContextPush(liveAudio, ctxLead);
+  const liveLines = mapLiveTranscripts(liveAudio.transcripts);
+  const usingLive = liveLines.length > 0;
+  const renderedTranscript = usingLive
+    ? liveLines
+    : transcriptLines.slice(0, visibleTranscript);
+  const latestTranscriptText = usingLive
+    ? liveLines[liveLines.length - 1].text
+    : transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text;
+  const liveCards = liveSuggestionsToCards(liveAudio.suggestions);
   const collapsed = useDraggable(620, 55);
   const expanded = useDraggable(560, 30);
   const hidden = useDraggable(820, 55);
@@ -1264,8 +1999,10 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
   }, []);
 
-  const peclItems = DEFAULT_PECL_ITEMS;
+  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
   const peclDone = peclItems.filter(i => i.done).length;
+  const mspCovered = peclItems.find(i => i.id === "msp")?.done === true;
+  const mspBadge = mspBadgeMode({ elapsedMs, mspCovered });
   const clearBg = (a) => `rgba(0, 40, 42, ${a})`;
   const clearBorder = (a) => `1px solid rgba(0, 123, 127, ${a})`;
 
@@ -1273,6 +2010,37 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
     if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
   };
+
+  // Tier 4 — active card insertion + PECL override handlers (mirror of MobileLayout).
+  const activeCardKey = liveCards.length > 0
+    ? (liveCards[liveCards.length - 1].id || liveCards[liveCards.length - 1].trigger)
+    : `demo-${shownResponses - 1}`;
+  const lastActiveCardKeyRef = useRef(activeCardKey);
+  useEffect(() => {
+    if (lastActiveCardKeyRef.current !== activeCardKey) {
+      lastActiveCardKeyRef.current = activeCardKey;
+      setInsertedScripts(new Set());
+    }
+  }, [activeCardKey]);
+
+  const handleInsertScript = useCallback((id) => {
+    if (!id || !COMPLIANCE_SCRIPTS[id]) return;
+    setInsertedScripts((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handlePeclToggle = useCallback((id) => {
+    const baseItem = DEFAULT_PECL_ITEMS.find((it) => it.id === id);
+    if (!baseItem) return;
+    const autoCovered = liveAudio.autoPecl?.has?.(id) === true;
+    setPeclOverrides((prev) =>
+      togglePeclOverride(prev, id, { baseDone: baseItem.done, autoCovered })
+    );
+  }, [liveAudio.autoPecl]);
 
   const panelDefs = [
     { key: "call", label: "Call Info", icon: Phone },
@@ -1306,13 +2074,13 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 10 }}>
         {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"],["End Call","📕"]].map(([l,ic]) => (
-          <button key={l} style={{ background: l==="End Call" ? "rgba(231,76,60,0.3)" : "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 4px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+          <button key={l} onClick={l === "End Call" ? onEndCall : undefined} disabled={l === "End Call" && callEnded} style={{ background: l==="End Call" ? (callEnded ? "rgba(231,76,60,0.12)" : "rgba(231,76,60,0.3)") : "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 4px", cursor: l === "End Call" && callEnded ? "default" : "pointer", opacity: l === "End Call" && callEnded ? 0.55 : 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
             <span style={{ fontSize: 16 }}>{ic}</span>
-            <span style={{ fontFamily: T.display, fontSize: 9, color: "#999" }}>{l}</span>
+            <span style={{ fontFamily: T.display, fontSize: 9, color: "#999" }}>{l === "End Call" && callEnded ? "Ended" : l}</span>
           </button>
         ))}
       </div>
-      <ComplianceHub peclItems={peclItems} compact />
+      <ComplianceHub peclItems={peclItems} onTogglePecl={handlePeclToggle} compact />
     </div>
   );
 
@@ -1321,9 +2089,12 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
         <Volume2 size={10} color="rgba(255,255,255,0.2)" />
         <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Live Transcript</span>
+        {callEnded && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#ff8a7b", background: "rgba(231,76,60,0.12)", padding: "1px 5px", borderRadius: 3 }}>● ended</span>}
+        {!callEnded && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
+        {!callEnded && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
         {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)", marginLeft: "auto" }}>Five9 — Maria Garcia, 33024</span>}
       </div>
-      {transcriptLines.slice(0, visibleTranscript).map((line, i) => (
+      {renderedTranscript.map((line, i) => (
         <div key={i} style={{ display: "flex", gap: 8, padding: "3px 0", alignItems: "flex-start" }}>
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.15)", minWidth: 28 }}>{line.time}</span>
           <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, minWidth: 40, color: line.speaker === "client" ? T.coral : "rgba(255,255,255,0.3)" }}>
@@ -1339,13 +2110,34 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   );
 
   const renderDesktopCopilot = () => {
-    const resp = aiResponses[shownResponses - 1];
+    const resp = liveCards.length > 0
+      ? liveCards[liveCards.length - 1]
+      : aiResponses[shownResponses - 1];
+    // Each pill carries a `field` identifier that maps back to a LeadContext
+    // field name. Hovering the pill highlights the matching cell in
+    // LeadContextPanel (spec §A3). When no underlying lead field applies
+    // (e.g. a plan ID), field is null and the pill is a plain label.
     const sourcesByTrigger = {
-      "what plans would cover my Eliquis": ["ZIP 33024", "Rx: Eliquis", "Coverage: Original Medicare"],
-      "Dr. Patel at Baptist Health": ["PCP: Dr. Patel", "Plan: Humana S5884-065"],
-      "what about dental": ["ZIP 33024", "Coverage gap: dental"],
+      "what plans would cover my Eliquis": [
+        { label: "ZIP 33024", field: "address" },
+        { label: "Rx: Eliquis", field: "medications" },
+        { label: "Coverage: Original Medicare", field: "coverage" },
+      ],
+      "Dr. Patel at Baptist Health": [
+        { label: "PCP: Dr. Patel", field: "providers" },
+        { label: "Plan: Humana S5884-065", field: null },
+      ],
+      "what about dental": [
+        { label: "ZIP 33024", field: "address" },
+        { label: "Coverage gap: dental", field: "coverage" },
+      ],
     };
-    const sources = sourcesByTrigger[resp.trigger];
+    // Live cards bring their own sources from the engine (plain strings,
+    // no field highlight). Demo cards fall back to the curated map above
+    // which carries field identifiers for the Lead-context ring (§A3).
+    const sources = resp.sources ?? sourcesByTrigger[resp.trigger];
+    const { sayThis: augmentedSayThis, inserted: insertedScriptDetails } =
+      applyInsertedScripts(resp.sayThis, insertedScripts);
     return (
       <div>
         <LeadContextPanel scaledFont={scaledFont} />
@@ -1363,8 +2155,33 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
         {/* ── Say this: ── */}
         <div style={{ marginBottom: 10, background: "rgba(0,123,127,0.09)", border: "1px solid rgba(0,123,127,0.28)", borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0", padding: "10px 12px" }}>
-          <div style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Say this:</div>
-          <div style={{ fontFamily: T.body, fontSize: scaledFont(13), lineHeight: 1.65, color: "rgba(255,255,255,0.92)" }}>{resp.sayThis}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.08em" }}>Say this:</span>
+            <div style={{ flex: 1 }} />
+            {insertedScriptDetails.map((ins) => (
+              <span key={ins.id} title={`${ins.label} script appended`} style={{
+                display: "inline-flex", alignItems: "center", gap: 3,
+                padding: "1px 5px", borderRadius: 3,
+                background: "rgba(245,166,35,0.18)", color: "#F5A623",
+                fontFamily: T.display, fontWeight: 700, fontSize: 8, letterSpacing: "0.07em", textTransform: "uppercase",
+              }}>+ {ins.label}</span>
+            ))}
+            <button
+              type="button"
+              data-no-drag="true"
+              onClick={() => handleInsertScript("msp")}
+              disabled={insertedScripts.has("msp")}
+              title={insertedScripts.has("msp") ? "MSP script already inserted" : "Insert MSP script"}
+              style={{
+                fontFamily: T.display, fontWeight: 700, fontSize: 8, letterSpacing: "0.06em", textTransform: "uppercase",
+                padding: "2px 6px", borderRadius: 4, cursor: insertedScripts.has("msp") ? "default" : "pointer",
+                background: insertedScripts.has("msp") ? "rgba(255,255,255,0.04)" : "rgba(0,123,127,0.18)",
+                color: insertedScripts.has("msp") ? "rgba(255,255,255,0.3)" : T.teal,
+                border: "1px solid rgba(0,123,127,0.25)",
+              }}
+            >+ MSP</button>
+          </div>
+          <div style={{ fontFamily: T.body, fontSize: scaledFont(13), lineHeight: 1.65, color: "rgba(255,255,255,0.92)", whiteSpace: "pre-wrap" }}>{augmentedSayThis}</div>
         </div>
 
         {/* ── If they press more: ── */}
@@ -1455,7 +2272,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         }}>
           <Eye size={12} color={T.teal} />
           <span style={{ fontFamily: T.display, fontWeight: 600, fontSize: 10, color: T.teal }}>TriBe</span>
-          {audioOn && <AudioWave active bars={3} />}
+          {audioOn && <AudioWave active bars={3} analyser={liveAudio.analyser} />}
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.3)" }}>⌘⇧S</span>
         </button>
       </div>
@@ -1464,7 +2281,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
   // ─── COLLAPSED ───
   if (mode === "collapsed") {
-    const latestResp = aiResponses[shownResponses - 1];
+    const latestResp = liveCards.length > 0
+      ? liveCards[liveCards.length - 1]
+      : aiResponses[shownResponses - 1];
     return (
       <div onMouseDown={collapsed.onMouseDown} style={{
         position: "absolute", left: collapsed.pos.x, top: collapsed.pos.y,
@@ -1483,7 +2302,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)", borderRadius: 6 }}>
             {audioOn ? <Volume2 size={11} color="#34C77B" /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
-            <AudioWave active={audioOn} color="#34C77B" bars={4} />
+            <AudioWave active={audioOn} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", borderRadius: 6 }}>
             <Monitor size={11} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
@@ -1510,7 +2329,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", marginBottom: 6, background: "rgba(255,255,255,0.03)", borderRadius: 6, borderLeft: "2px solid rgba(52,199,123,0.4)" }}>
             <Volume2 size={10} color="rgba(255,255,255,0.3)" />
             <span style={{ fontFamily: T.body, fontStyle: "italic", fontSize: scaledFont(11), color: "rgba(255,255,255,0.5)", flex: 1 }}>
-              "{transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text.slice(0, 65)}..."
+              "{latestTranscriptText.slice(0, 65)}{latestTranscriptText.length > 65 ? "..." : ""}"
             </span>
           </div>
           {/* Say this: preview */}
@@ -1625,20 +2444,47 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
         {/* ─── Context bar ─── */}
         <div data-no-drag="true" style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderBottom: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }}>
-          <button onClick={() => setAudioOn(!audioOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
-            {audioOn ? <Volume2 size={11} color="#34C77B" /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
-            <AudioWave active={audioOn} color="#34C77B" bars={4} />
-            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: audioOn ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn ? "Listening" : "Muted"}</span>
+          <button onClick={() => !callEnded && setAudioOn(!audioOn)} disabled={callEnded} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: callEnded ? "rgba(255,255,255,0.03)" : (audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)"), border: `1px solid ${callEnded ? "rgba(255,255,255,0.06)" : (audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)")}`, borderRadius: 6, cursor: callEnded ? "default" : "pointer", opacity: callEnded ? 0.5 : 1 }}>
+            {audioOn && !callEnded ? <Volume2 size={11} color="#34C77B" /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
+            <AudioWave active={audioOn && !callEnded} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: audioOn && !callEnded ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn && !callEnded ? (liveAudio.live ? "Listening" : (BACKEND_WSS_URL ? "Connecting" : "Listening")) : "Muted"}</span>
           </button>
           <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? "rgba(0,123,127,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
             <Monitor size={11} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
             <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: screenOn ? T.teal : "rgba(255,255,255,0.3)" }}>{screenOn ? "Screen On" : "Screen Off"}</span>
           </button>
+          {callEnded ? (
+            <button onClick={onResumeCall} title="Resume the call" style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(52,199,123,0.12)", border: "1px solid rgba(52,199,123,0.35)", borderRadius: 6, cursor: "pointer" }}>
+              <Phone size={10} color="#34C77B" />
+              <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "#34C77B" }}>Resume</span>
+            </button>
+          ) : (
+            <button onClick={onEndCall} title="End call — stops mic + transcription" style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(231,76,60,0.12)", border: "1px solid rgba(231,76,60,0.35)", borderRadius: 6, cursor: "pointer" }}>
+              <span style={{ width: 7, height: 7, borderRadius: 2, background: "#E74C3C" }} />
+              <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "#ff8a7b" }}>End Call</span>
+            </button>
+          )}
           <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(245,166,35,0.08)", borderRadius: 6 }}>
-            <AlertTriangle size={10} color="#F5A623" />
-            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: "#F5A623" }}>MSP</span>
-          </div>
+          {mspBadge !== "hidden" && (
+            <div
+              title={mspBadge === "amber"
+                ? "MSP still uncovered after 10 minutes — raise it now"
+                : "MSP disclosure pending"}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "3px 8px", borderRadius: 6,
+                background: mspBadge === "amber" ? "rgba(245,166,35,0.18)" : "rgba(245,166,35,0.08)",
+                border: mspBadge === "amber" ? "1px solid rgba(245,166,35,0.45)" : "1px solid transparent",
+                animation: mspBadge === "amber" ? "mspHeaderPulse 2s infinite" : "none",
+              }}
+            >
+              <AlertTriangle size={10} color="#F5A623" />
+              <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: mspBadge === "amber" ? 800 : 600, color: "#F5A623" }}>
+                {mspBadge === "amber" ? "MSP overdue" : "MSP"}
+              </span>
+            </div>
+          )}
+          <style>{`@keyframes mspHeaderPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(245,166,35,0.45); } 50% { box-shadow: 0 0 0 4px rgba(245,166,35,0); } }`}</style>
           <span style={{ fontFamily: T.display, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>PECL</span>
           <div style={{ width: 40, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2 }}>
             <div style={{ width: `${(peclDone/5)*100}%`, height: 3, background: T.teal, borderRadius: 2 }} />
@@ -1763,6 +2609,11 @@ export default function MacOSDesktopMockup() {
   const isMobile = useIsMobile();
   const [mode, setMode] = useState("expanded");
   const [opacity, setOpacity] = useState(0.82);
+  // Call lifecycle is lifted here so the standalone Five9Window mock and
+  // the overlay's own End Call button drive the same state.
+  const [callEnded, setCallEnded] = useState(false);
+  const handleEndCall = useCallback(() => setCallEnded(true), []);
+  const handleResumeCall = useCallback(() => setCallEnded(false), []);
 
   if (isMobile) return <MobileLayout />;
 
@@ -1773,8 +2624,8 @@ export default function MacOSDesktopMockup() {
         <div style={{ position: "absolute", bottom: "20%", right: "30%", width: 300, height: 300, borderRadius: "50%", background: "rgba(244,124,110,0.06)", filter: "blur(60px)" }} />
       </div>
       <MacMenuBar />
-      <Five9Window />
-      <MediCopilotOverlay mode={mode} setMode={setMode} opacity={opacity} />
+      <Five9Window callEnded={callEnded} onEndCall={handleEndCall} />
+      <MediCopilotOverlay mode={mode} setMode={setMode} opacity={opacity} callEnded={callEnded} onEndCall={handleEndCall} onResumeCall={handleResumeCall} />
       <MacDock />
       <div style={{ position: "absolute", top: 32, left: "50%", transform: "translateX(-50%)", padding: "4px 12px", background: "rgba(0,0,0,0.5)", borderRadius: 8, fontFamily: T.display, fontSize: 11, color: "rgba(255,255,255,0.5)" }}>
         Drag MediCopilot anywhere · Click "Ask AI" or ⌘Enter to see next response

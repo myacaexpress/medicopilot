@@ -1,0 +1,256 @@
+/**
+ * WSS /stream — long-lived WebSocket for the live-call pipeline.
+ *
+ * Tier 2 scope (current):
+ *   - Browser opens a session and sends `{ type: "start" }`
+ *   - Server opens a Deepgram Nova-3 streaming connection
+ *   - Browser ships binary linear16 PCM frames (16 kHz mono, 200 ms each)
+ *   - Server forwards them to Deepgram
+ *   - Deepgram returns finalised utterances → server runs them through
+ *     the PII redactor → broadcasts a `utterance` JSON frame back to the
+ *     browser
+ *   - Browser sends `{ type: "stop" }` (or disconnects) → Deepgram closes
+ *
+ * Wire format (UTF-8 JSON for control + binary for audio):
+ *   server→client:
+ *     { type: "hello", sessionId: string, serverTime: ISO }                 — on connect
+ *     { type: "ready", sessionId: string }                                  — Deepgram is open
+ *     { type: "utterance", sessionId, final: true, speaker, text,
+ *         ts, redactionCounts: { ssn, credit_card, phone } }                — redacted final utterance
+ *     { type: "suggestion_start", sessionId, id, kind }                     — Claude stream opened
+ *     { type: "suggestion_delta", sessionId, id, kind, delta }              — partial JSON token
+ *     { type: "suggestion_done",  sessionId, id, kind, suggestion }         — final AIResponse
+ *     { type: "suggestion_error", sessionId, id, kind, code, message }      — stream failed
+ *     { type: "pecl_update", sessionId, items: PeclItemId[] }               — newly auto-marked items
+ *     { type: "pong", t: number }
+ *     { type: "error", code: string, message: string }
+ *   client→server:
+ *     { type: "ping", t: number }
+ *     { type: "start", sampleRate?: number }                                — open Deepgram
+ *     { type: "stop" }                                                      — close Deepgram
+ *     { type: "lead_context", lead: object|null }                           — snapshot for Claude prompt
+ *     { type: "bye" }                                                       — graceful socket close
+ *     <binary>                                                              — Int16LE PCM frame
+ */
+
+import { randomUUID } from "node:crypto";
+import { redact } from "../redact.js";
+import { createDeepgramSession } from "../deepgram.js";
+import { SuggestionEngine } from "../suggestions/engine.js";
+import { createAnthropicClient } from "../suggestions/claude.js";
+
+/**
+ * @param {import("fastify").FastifyInstance} app
+ */
+export default async function streamRoutes(app) {
+  // The factory is decorated by build() — tests inject a stub. Default
+  // is the real Deepgram WS client.
+  const deepgramFactory = app.deepgramFactory ?? createDeepgramSession;
+  const apiKey = app.env?.deepgramApiKey ?? null;
+  const sampleRate = app.env?.deepgramSampleRate ?? 16000;
+
+  // Suggestion engine deps. Tests can inject `app.suggestionClientFactory`
+  // and `app.suggestionEngineFactory` to stub Claude. In prod we lazily
+  // build a real Anthropic client per session (cheap; just an http agent).
+  const suggestionClientFactory =
+    app.suggestionClientFactory ??
+    (() => createAnthropicClient(app.env?.anthropicApiKey ?? null));
+  const suggestionEngineFactory =
+    app.suggestionEngineFactory ??
+    ((deps) => new SuggestionEngine(deps));
+  const suggestionModel = app.env?.suggestionModel ?? "claude-sonnet-4-6";
+  const suggestionWindowMs = app.env?.suggestionWindowMs ?? 120_000;
+  const suggestionDebounceMs = app.env?.suggestionDebounceMs ?? 8_000;
+
+  app.get("/stream", { websocket: true }, (socket, req) => {
+    const sessionId = randomUUID();
+    const log = app.log.child({ sessionId, remoteAddr: req.ip });
+    log.info("stream: client connected");
+
+    /** @type {ReturnType<typeof createDeepgramSession>|null} */
+    let dg = null;
+    let frameCount = 0;
+    let byteCount = 0;
+
+    const send = (obj) => {
+      if (socket.readyState === socket.OPEN) {
+        socket.send(JSON.stringify(obj));
+      }
+    };
+
+    const sendError = (code, message) => send({ type: "error", code, message });
+
+    // Build a per-session suggestion engine. If the Anthropic key is
+    // missing we leave `engine` null — utterances still flow but no
+    // suggestion frames go out. The agent UI falls back to demo cards.
+    let engine = null;
+    const sClient = suggestionClientFactory();
+    if (sClient) {
+      engine = suggestionEngineFactory({
+        client: sClient,
+        model: suggestionModel,
+        log,
+        emit: (event) => send({ ...event, sessionId }),
+        opts: {
+          windowMs: suggestionWindowMs,
+          cooldownMs: suggestionDebounceMs,
+        },
+      });
+    } else {
+      log.warn("stream: ANTHROPIC_API_KEY unset — suggestion engine disabled");
+    }
+
+    socket.send(
+      JSON.stringify({
+        type: "hello",
+        sessionId,
+        serverTime: new Date().toISOString(),
+      })
+    );
+
+    /** Open a Deepgram session for this client. */
+    const startDeepgram = async () => {
+      if (dg) {
+        sendError("already_started", "Deepgram session already open");
+        return;
+      }
+      if (!apiKey) {
+        log.warn("stream: start requested but DEEPGRAM_API_KEY is unset");
+        sendError("no_api_key", "Server is missing DEEPGRAM_API_KEY");
+        return;
+      }
+      try {
+        dg = deepgramFactory({
+          apiKey,
+          sampleRate,
+          log,
+          onUtterance: (u) => {
+            // Compliance gate: redact BEFORE the bytes leave the server
+            // (broadcast or log). The test suite has an invariant that
+            // verifies the broadcast frame is always post-redaction.
+            const { redacted, counts } = redact(u.text);
+            log.debug(
+              { redactionCounts: counts, len: redacted.length, speaker: u.speaker },
+              "stream: utterance (redacted)"
+            );
+            send({
+              type: "utterance",
+              sessionId,
+              final: true,
+              speaker: u.speaker,
+              text: redacted,
+              ts: u.ts,
+              redactionCounts: counts,
+            });
+            // Feed the (already-redacted) utterance into the engine.
+            // Fire-and-forget — the engine emits its own events back
+            // through `send`, and any failure is logged inside.
+            if (engine) {
+              Promise.resolve(
+                engine.ingestUtterance({ speaker: u.speaker, text: redacted, ts: u.ts })
+              ).catch((err) =>
+                log.warn({ err: err.message }, "stream: engine ingest failed")
+              );
+            }
+          },
+          onError: (err) => {
+            log.error({ err: err.message }, "stream: deepgram error");
+            sendError("deepgram_error", err.message);
+          },
+          onClose: () => {
+            dg = null;
+          },
+        });
+        await dg.readyPromise;
+        log.info({ frameCount, byteCount }, "stream: deepgram ready");
+        send({ type: "ready", sessionId });
+      } catch (err) {
+        log.error({ err: err.message }, "stream: failed to open deepgram");
+        sendError("deepgram_unavailable", err.message);
+        dg = null;
+      }
+    };
+
+    /** Close the Deepgram session for this client. */
+    const stopDeepgram = (reason = "client-stop") => {
+      if (!dg) return;
+      log.info({ reason, frameCount, byteCount }, "stream: closing deepgram");
+      try {
+        dg.close();
+      } catch (err) {
+        log.warn({ err: err.message }, "stream: error closing deepgram");
+      }
+      dg = null;
+    };
+
+    socket.on("message", (raw, isBinary) => {
+      // Binary frame? Treat as PCM audio destined for Deepgram.
+      if (isBinary) {
+        if (!dg) {
+          // The browser shipped audio before `start` succeeded. Drop it
+          // silently — getting here once at session boundary is fine, a
+          // sustained pattern is a bug worth tracing.
+          return;
+        }
+        const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+        if (buf.length === 0) return;
+        if (buf.length % 2 !== 0) {
+          // Int16LE samples — frames must be an even number of bytes.
+          sendError("bad_frame", `audio frame length must be even, got ${buf.length}`);
+          return;
+        }
+        frameCount += 1;
+        byteCount += buf.length;
+        dg.sendAudio(buf);
+        return;
+      }
+
+      // Otherwise it's a JSON control message.
+      let msg;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        sendError("bad_json", "Expected JSON payload");
+        return;
+      }
+
+      switch (msg.type) {
+        case "ping":
+          send({ type: "pong", t: msg.t ?? Date.now() });
+          return;
+        case "start":
+          startDeepgram();
+          return;
+        case "stop":
+          stopDeepgram("client-stop");
+          return;
+        case "lead_context":
+          // Client snapshot of the lead — drives Claude prompt context.
+          // We trust the client to redact PII it doesn't want sent;
+          // server-side redaction happens at the Deepgram boundary.
+          if (engine) engine.setLead(msg.lead ?? null);
+          return;
+        case "bye":
+          log.info("stream: client sent bye");
+          stopDeepgram("client-bye");
+          socket.close(1000, "client-bye");
+          return;
+        default:
+          sendError("unknown_type", `Unknown message type: ${msg.type}`);
+      }
+    });
+
+    socket.on("close", (code, reason) => {
+      stopDeepgram("socket-close");
+      if (engine) engine.dispose();
+      log.info(
+        { code, reason: reason?.toString(), frameCount, byteCount },
+        "stream: client disconnected"
+      );
+    });
+
+    socket.on("error", (err) => {
+      log.error({ err: err.message }, "stream: socket error");
+    });
+  });
+}

@@ -1,0 +1,41 @@
+# Fly.io configuration for medicopilot-myacaexpress
+#
+# Deploy:
+#   cd server
+#   fly launch --no-deploy   # first time only — creates app
+#   fly deploy               # subsequent deploys
+#
+# Secrets (set once per environment):
+#   fly secrets set DEEPGRAM_API_KEY=... ANTHROPIC_API_KEY=... (P2+)
+
+app = 'medicopilot-myacaexpress'
+primary_region = 'iad'      # same as plan vendors; low latency to Anthropic + Deepgram US East
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  LOG_LEVEL = 'info'
+  NODE_ENV = 'production'
+  PORT = '8080'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'suspend'    # P2: keep warm while calls run; suspend when idle
+  auto_start_machines = true
+  min_machines_running = 0          # scale to zero when no calls — cheap for MVP
+  processes = ['app']
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/health'
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 512

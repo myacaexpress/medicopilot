@@ -14,6 +14,8 @@
 export { MOCK_LEADS, RECENT_LEADS } from "./leads.js";
 export { transcriptLines } from "./transcript.js";
 export { aiResponses } from "./aiResponses.js";
-export { DEFAULT_PECL_ITEMS } from "./pecl.js";
+export { DEFAULT_PECL_ITEMS, mergePeclItems, togglePeclOverride } from "./pecl.js";
 export { MockPlanProvider, PLAN_SEED } from "./plans/index.js";
 export { RECORDING_CONSENT, consentPolicy } from "./compliance/states.js";
+export { COMPLIANCE_SCRIPTS, applyInsertedScripts, getComplianceScript } from "./compliance/scripts.js";
+export { mspBadgeMode, MSP_AMBER_THRESHOLD_MS } from "./compliance/mspBadge.js";
