@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "server:dev": "npm --prefix server run dev",
+    "server:test": "npm --prefix server test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",
