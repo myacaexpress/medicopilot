@@ -1,11 +1,12 @@
 /**
  * Tests for LeadContext reducer and helpers.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   leadReducer,
   makeField,
   buildLeadFromExtraction,
+  commitLeadEdit,
 } from "../lead/LeadContext.jsx";
 
 describe("makeField", () => {
@@ -121,5 +122,78 @@ describe("leadReducer", () => {
   it("unknown action returns state unchanged", () => {
     const result = leadReducer(sampleLead, { type: "UNKNOWN" });
     expect(result).toBe(sampleLead);
+  });
+});
+
+describe("commitLeadEdit", () => {
+  const baseLead = {
+    id: "captured_123",
+    source: "vision",
+    fields: {
+      firstName: makeField("Maria", "high", "vision"),
+      lastName: makeField("Garcia", "high", "vision"),
+      dob: makeField("1952-03-15", "medium", "vision"),
+      address: makeField({ street: "", city: "Pembroke Pines", state: "FL", zip: "33024" }, "high", "vision"),
+    },
+    createdAt: "2026-04-15T00:00:00.000Z",
+    updatedAt: "2026-04-15T00:00:00.000Z",
+  };
+
+  it("splits a name into firstName + lastName", () => {
+    const updateField = vi.fn();
+    commitLeadEdit(baseLead, "name", "Marie Garcia", updateField);
+    expect(updateField).toHaveBeenCalledWith("firstName", "Marie", "verified");
+    // lastName unchanged, should not be called
+    expect(updateField).not.toHaveBeenCalledWith("lastName", expect.anything(), expect.anything());
+  });
+
+  it("handles a single-word name (no lastName)", () => {
+    const updateField = vi.fn();
+    commitLeadEdit(baseLead, "name", "Marie", updateField);
+    expect(updateField).toHaveBeenCalledWith("firstName", "Marie", "verified");
+    expect(updateField).toHaveBeenCalledWith("lastName", "", "verified");
+  });
+
+  it("parses City, ST ZIP into structured address", () => {
+    const updateField = vi.fn();
+    commitLeadEdit(baseLead, "address", "Hialeah, FL 33013", updateField);
+    expect(updateField).toHaveBeenCalledTimes(1);
+    expect(updateField).toHaveBeenCalledWith(
+      "address",
+      expect.objectContaining({ city: "Hialeah", state: "FL", zip: "33013" }),
+      "verified"
+    );
+  });
+
+  it("parses Street, City, ST ZIP into structured address", () => {
+    const updateField = vi.fn();
+    commitLeadEdit(baseLead, "address", "123 Main St, Hialeah, FL 33013", updateField);
+    expect(updateField).toHaveBeenCalledWith(
+      "address",
+      expect.objectContaining({ street: "123 Main St", city: "Hialeah", state: "FL", zip: "33013" }),
+      "verified"
+    );
+  });
+
+  it("uppercases state code", () => {
+    const updateField = vi.fn();
+    commitLeadEdit(baseLead, "address", "Miami, fl 33101", updateField);
+    expect(updateField).toHaveBeenCalledWith(
+      "address",
+      expect.objectContaining({ state: "FL" }),
+      "verified"
+    );
+  });
+
+  it("falls back to raw string if address doesn't match pattern", () => {
+    const updateField = vi.fn();
+    commitLeadEdit(baseLead, "address", "just some free form text", updateField);
+    expect(updateField).toHaveBeenCalledWith("address", "just some free form text", "verified");
+  });
+
+  it("updates simple fields (dob, phone, coverage) by name", () => {
+    const updateField = vi.fn();
+    commitLeadEdit(baseLead, "dob", "1952-04-01", updateField);
+    expect(updateField).toHaveBeenCalledWith("dob", "1952-04-01", "verified");
   });
 });

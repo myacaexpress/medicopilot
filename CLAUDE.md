@@ -83,6 +83,8 @@ All secrets live in environment variables — **never in the client bundle**. Se
 │   │   ├── extractLeadFromImage.js — API client for vision + text extraction
 │   │   ├── useConsentBanner.js   — consent state hook (sessionStorage gate)
 │   │   └── ConsentBanner.jsx     — recording consent banner UI
+│   ├── ui/                       — Cross-cutting UI primitives
+│   │   └── Toast.jsx             — ToastProvider + useToast() (P1 error surfacing)
 │   ├── __tests__/                — Vitest tests
 │   │   ├── leadContext.test.js   — reducer + helpers
 │   │   ├── dataShape.test.js     — mock data shape validation
@@ -156,7 +158,7 @@ npm run dev       # Vite dev server on :5173
 npm run build     # production build to dist/
 npm run preview   # preview the prod build locally
 npm run lint      # ESLint
-npm test          # Vitest (29 tests)
+npm test          # Vitest (36 tests)
 npm run test:watch # Vitest in watch mode
 ```
 

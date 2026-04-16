@@ -7,11 +7,12 @@ import {
   aiResponses,
   DEFAULT_PECL_ITEMS,
 } from "./data/index.js";
-import { useLead, buildLeadFromExtraction, makeField } from "./lead/LeadContext.jsx";
+import { useLead, buildLeadFromExtraction, commitLeadEdit, makeField } from "./lead/LeadContext.jsx";
 import { useScreenCapture } from "./capture/useScreenCapture.js";
 import { extractLeadFromImage, extractLeadFromText } from "./capture/extractLeadFromImage.js";
 import { useConsentBanner } from "./capture/useConsentBanner.js";
 import { ConsentBanner } from "./capture/ConsentBanner.jsx";
+import { useToast } from "./ui/Toast.jsx";
 
 const T = {
   teal: "#007B7F", tealDark: "#004D50", tealLight: "#1A9EA2",
@@ -239,6 +240,20 @@ function CaptureLeadModal({ onCommit, onClose }) {
   const { lead } = useLead();
   const leadState = lead?.fields?.address?.v?.state;
   const consent = useConsentBanner({ leadStateCode: leadState });
+  const toast = useToast();
+
+  // Centralized error surfacer: sets inline error stage AND emits a toast
+  // (toast gives a glanceable notification above the modal; stage gives
+  // recovery actions inside it).
+  const surfaceError = useCallback((message, { toastKind = "error", toastTitle, toastDetail } = {}) => {
+    setError(message);
+    setStage("error");
+    toast.show({
+      kind: toastKind,
+      title: toastTitle || (toastKind === "warn" ? "No lead info found" : "Extraction failed"),
+      detail: toastDetail || message,
+    });
+  }, [toast]);
 
   // Marquee selection state (user drags on the captured frame)
   const [marquee, setMarquee] = useState({ x: 0, y: 0, w: 0, h: 0 });
@@ -273,13 +288,16 @@ function CaptureLeadModal({ onCommit, onClose }) {
       setMarquee({ x: 0, y: 0, w: 0, h: 0 });
       setStage("selecting");
     } else if (screen.status === "denied") {
-      setError("Screen access denied. Enable in browser settings or enter manually.");
-      setStage("error");
+      surfaceError("Screen access denied. Enable in browser settings or enter manually.", {
+        toastTitle: "Screen access denied",
+      });
     } else if (screen.status === "unsupported") {
-      setError("Screen capture is not supported on this device. Use photo upload or paste instead.");
-      setStage("error");
+      surfaceError("Screen capture is not supported on this device. Use photo upload or paste instead.", {
+        toastTitle: "Capture unavailable",
+        toastKind: "warn",
+      });
     }
-  }, [screen.status, screen.capturedFrame]);
+  }, [screen.status, screen.capturedFrame, surfaceError]);
 
   // Mouse handlers for marquee drawing on the captured frame
   const handleFrameMouseDown = (e) => {
@@ -307,7 +325,12 @@ function CaptureLeadModal({ onCommit, onClose }) {
     setDragging(false);
   };
 
-  const marqueeDone = !dragging && marquee.w > 10 && marquee.h > 10;
+  // Per spec §2 error table: require both dimensions ≥ 20px before Extract
+  // is eligible. Anything smaller is almost certainly a misclick.
+  const MIN_MARQUEE = 20;
+  const hasAnyMarquee = marquee.w > 0 && marquee.h > 0;
+  const marqueeTooSmall = hasAnyMarquee && (marquee.w < MIN_MARQUEE || marquee.h < MIN_MARQUEE);
+  const marqueeDone = !dragging && hasAnyMarquee && !marqueeTooSmall;
 
   // Run extraction on the cropped region
   const handleExtract = async () => {
@@ -332,8 +355,7 @@ function CaptureLeadModal({ onCommit, onClose }) {
 
     const base64 = screen.cropToBase64(cropRect);
     if (!base64) {
-      setError("Failed to crop region. Try again.");
-      setStage("error");
+      surfaceError("Failed to crop region. Try again.", { toastTitle: "Crop failed" });
       return;
     }
 
@@ -341,13 +363,15 @@ function CaptureLeadModal({ onCommit, onClose }) {
     if (result.kind === "success") {
       setExtracted(result.fields);
       setStage("review");
+    } else if (result.kind === "empty") {
+      surfaceError("No lead info found. Try again or paste manually.", {
+        toastKind: "warn",
+        toastTitle: "No lead info found",
+      });
+    } else if (result.kind === "denied") {
+      surfaceError("API access denied. Check configuration.", { toastTitle: "API denied" });
     } else {
-      setError(
-        result.kind === "empty" ? "No lead info found. Try again or paste manually." :
-        result.kind === "denied" ? "API access denied. Check configuration." :
-        result.error || "Extraction failed. Retry."
-      );
-      setStage("error");
+      surfaceError(result.error || "Extraction failed. Retry.");
     }
   };
 
@@ -360,8 +384,10 @@ function CaptureLeadModal({ onCommit, onClose }) {
       setExtracted(result.fields);
       setStage("review");
     } else {
-      setError(result.error || "No lead info found in pasted text.");
-      setStage("error");
+      surfaceError(result.error || "No lead info found in pasted text.", {
+        toastKind: result.kind === "empty" ? "warn" : "error",
+        toastTitle: result.kind === "empty" ? "No lead info found" : "Paste parse failed",
+      });
     }
   };
 
@@ -379,13 +405,14 @@ function CaptureLeadModal({ onCommit, onClose }) {
         setExtracted(result.fields);
         setStage("review");
       } else {
-        setError(result.error || "No lead info found in photo.");
-        setStage("error");
+        surfaceError(result.error || "No lead info found in photo.", {
+          toastKind: result.kind === "empty" ? "warn" : "error",
+          toastTitle: result.kind === "empty" ? "No lead info found" : "Photo parse failed",
+        });
       }
     };
     reader.onerror = () => {
-      setError("Failed to read file.");
-      setStage("error");
+      surfaceError("Failed to read file.", { toastTitle: "File read failed" });
     };
     reader.readAsDataURL(file);
   };
@@ -517,13 +544,18 @@ function CaptureLeadModal({ onCommit, onClose }) {
                     background: "rgba(0,123,127,0.05)",
                     pointerEvents: "none",
                   }}>
-                    {marqueeDone && (
+                    {!dragging && hasAnyMarquee && (
                       <div style={{
                         position: "absolute", top: -18, left: 0,
-                        fontFamily: T.mono, fontSize: 9, color: T.teal,
-                        padding: "1px 5px", background: "rgba(0,123,127,0.15)", borderRadius: 3,
+                        fontFamily: T.mono, fontSize: 9,
+                        color: marqueeTooSmall ? "#F5A623" : T.teal,
+                        padding: "1px 5px",
+                        background: marqueeTooSmall ? "rgba(245,166,35,0.15)" : "rgba(0,123,127,0.15)",
+                        borderRadius: 3,
                       }}>
-                        {Math.round(marquee.w)} × {Math.round(marquee.h)}
+                        {marqueeTooSmall
+                          ? `Too small — need ≥${MIN_MARQUEE}×${MIN_MARQUEE}`
+                          : `${Math.round(marquee.w)} × ${Math.round(marquee.h)}`}
                       </div>
                     )}
                   </div>
@@ -541,15 +573,24 @@ function CaptureLeadModal({ onCommit, onClose }) {
                 border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
                 fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
               }}>Retry</button>
-              <button disabled={!marqueeDone} onClick={handleExtract} style={{
-                flex: 2, padding: "9px 12px",
-                background: marqueeDone ? "linear-gradient(135deg, #007B7F, #004D50)" : "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
-                fontFamily: T.display, fontWeight: 700, fontSize: 11,
-                color: marqueeDone ? "#fff" : "rgba(255,255,255,0.3)",
-                cursor: marqueeDone ? "pointer" : "not-allowed",
-                letterSpacing: "0.04em", textTransform: "uppercase",
-              }}>✦ Extract</button>
+              <button
+                disabled={!marqueeDone}
+                onClick={handleExtract}
+                title={
+                  marqueeDone ? undefined :
+                  marqueeTooSmall ? `Region is too small — drag at least ${MIN_MARQUEE}×${MIN_MARQUEE}px` :
+                  "Drag a region on the captured image to select"
+                }
+                style={{
+                  flex: 2, padding: "9px 12px",
+                  background: marqueeDone ? "linear-gradient(135deg, #007B7F, #004D50)" : "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+                  fontFamily: T.display, fontWeight: 700, fontSize: 11,
+                  color: marqueeDone ? "#fff" : "rgba(255,255,255,0.3)",
+                  cursor: marqueeDone ? "pointer" : "not-allowed",
+                  letterSpacing: "0.04em", textTransform: "uppercase",
+                }}
+              >✦ Extract</button>
             </div>
           </div>
         )}
@@ -689,8 +730,100 @@ function CaptureLeadModal({ onCommit, onClose }) {
   );
 }
 
+// ─── Editable cell (P1): click-to-edit a lead field in place ───
+//
+// `field.editKind` decides how the string is split/parsed back into
+// individual LeadContext fields when the user commits:
+//   - "name":     "First Last…" → firstName + lastName
+//   - "address":  "City, ST 12345" → address.{city,state,zip}
+//   - "dob" | "phone" | "coverage": single-field update
+// Esc cancels; Enter or blur-outside commits.
+function EditableLeadCell({ field, editable, highlighted, scaledFont, onCommit }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  const begin = () => {
+    if (!editable) return;
+    setDraft(field.v || "");
+    setEditing(true);
+  };
+
+  const commit = () => {
+    setEditing(false);
+    const trimmed = (draft || "").trim();
+    const current = (field.v || "").toString().trim();
+    if (trimmed && trimmed !== current) onCommit(trimmed);
+  };
+
+  const cancel = () => {
+    setDraft("");
+    setEditing(false);
+  };
+
+  return (
+    <div
+      style={{
+        gridColumn: field.wide ? "span 2" : "span 1",
+        background: "rgba(255,255,255,0.025)",
+        border: `1px solid ${highlighted ? "rgba(26,158,162,0.85)" : "rgba(255,255,255,0.04)"}`,
+        borderRadius: 6,
+        padding: "4px 7px",
+        cursor: editable && !editing ? "text" : "default",
+        transition: "border-color 220ms ease, box-shadow 220ms ease",
+        boxShadow: highlighted ? "0 0 0 2px rgba(26,158,162,0.35), 0 0 18px rgba(26,158,162,0.35)" : "none",
+      }}
+      onClick={() => { if (!editing) begin(); }}
+      title={editable ? "Click to edit" : undefined}
+    >
+      <div style={{
+        fontFamily: T.display, fontWeight: 600, fontSize: 8,
+        letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)",
+      }}>
+        {field.k}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, minHeight: 16 }}>
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); commit(); }
+              else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              flex: 1, minWidth: 0,
+              background: "rgba(0,0,0,0.25)", border: "1px solid rgba(26,158,162,0.5)",
+              borderRadius: 4, padding: "2px 5px", color: "#fff", outline: "none",
+              fontFamily: T.body, fontSize: scaledFont(11), lineHeight: 1.35,
+            }}
+          />
+        ) : (
+          <span style={{
+            fontFamily: T.body, fontSize: scaledFont(11),
+            color: "rgba(255,255,255,0.9)", flex: 1, lineHeight: 1.35,
+          }}>
+            {field.v || "—"}
+          </span>
+        )}
+        <ConfidencePill level={field.pill} />
+      </div>
+    </div>
+  );
+}
+
 function LeadContextPanel({ scaledFont = (x) => x }) {
-  const { lead: ctxLead, actions } = useLead();
+  const { lead: ctxLead, highlightedField, actions } = useLead();
   const [activeId, setActiveId] = useState("maria");
   const [showSwitch, setShowSwitch] = useState(false);
   const [showCapture, setShowCapture] = useState(false);
@@ -698,16 +831,52 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
   // If we have a real lead from context, display it; otherwise fall back to mock data
   const hasRealLead = ctxLead && ctxLead.fields;
 
-  // Convert context lead fields to the display format the panel expects
+  // Convert context lead fields to the display format the panel expects.
+  // Each cell carries a `matches` array that lists the underlying fieldName(s)
+  // it represents — used to decide whether the highlight ring should fire when
+  // an AI source pill hovers a field name.
   const active = hasRealLead ? {
     id: ctxLead.id,
     source: `Captured · ${ctxLead.source}`,
     fields: [
-      ctxLead.fields.firstName && { k: "Name", v: `${ctxLead.fields.firstName?.v || ""} ${ctxLead.fields.lastName?.v || ""}`.trim(), pill: ctxLead.fields.firstName?.confidence || "medium" },
-      ctxLead.fields.dob && { k: "DOB", v: ctxLead.fields.dob.v, pill: ctxLead.fields.dob.confidence },
-      ctxLead.fields.phone && { k: "Phone", v: ctxLead.fields.phone.v, pill: ctxLead.fields.phone.confidence },
-      ctxLead.fields.address && { k: "Address · ZIP", v: typeof ctxLead.fields.address.v === "object" ? `${ctxLead.fields.address.v.city || ""}, ${ctxLead.fields.address.v.state || ""} ${ctxLead.fields.address.v.zip || ""}`.trim() : ctxLead.fields.address.v, pill: ctxLead.fields.address.confidence, wide: true },
-      ctxLead.fields.coverage && { k: "Coverage", v: ctxLead.fields.coverage.v, pill: ctxLead.fields.coverage.confidence },
+      ctxLead.fields.firstName && {
+        k: "Name",
+        v: `${ctxLead.fields.firstName?.v || ""} ${ctxLead.fields.lastName?.v || ""}`.trim(),
+        pill: ctxLead.fields.firstName?.confidence || "medium",
+        matches: ["firstName", "lastName", "name"],
+        editKind: "name",
+      },
+      ctxLead.fields.dob && {
+        k: "DOB",
+        v: ctxLead.fields.dob.v,
+        pill: ctxLead.fields.dob.confidence,
+        matches: ["dob"],
+        editKind: "dob",
+      },
+      ctxLead.fields.phone && {
+        k: "Phone",
+        v: ctxLead.fields.phone.v,
+        pill: ctxLead.fields.phone.confidence,
+        matches: ["phone"],
+        editKind: "phone",
+      },
+      ctxLead.fields.address && {
+        k: "Address · ZIP",
+        v: typeof ctxLead.fields.address.v === "object"
+          ? `${ctxLead.fields.address.v.city || ""}, ${ctxLead.fields.address.v.state || ""} ${ctxLead.fields.address.v.zip || ""}`.trim()
+          : ctxLead.fields.address.v,
+        pill: ctxLead.fields.address.confidence,
+        wide: true,
+        matches: ["address", "zip", "state", "city"],
+        editKind: "address",
+      },
+      ctxLead.fields.coverage && {
+        k: "Coverage",
+        v: ctxLead.fields.coverage.v,
+        pill: ctxLead.fields.coverage.confidence,
+        matches: ["coverage"],
+        editKind: "coverage",
+      },
     ].filter(Boolean),
   } : MOCK_LEADS[activeId];
 
@@ -757,17 +926,17 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px 8px" }}>
         {fields.map((f, i) => (
-          <div key={i} style={{
-            gridColumn: f.wide ? "span 2" : "span 1",
-            background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.04)",
-            borderRadius: 6, padding: "4px 7px",
-          }}>
-            <div style={{ fontFamily: T.display, fontWeight: 600, fontSize: 8, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)" }}>{f.k}</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4, minHeight: 16 }}>
-              <span style={{ fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.9)", flex: 1, lineHeight: 1.35 }}>{f.v || "—"}</span>
-              <ConfidencePill level={f.pill} />
-            </div>
-          </div>
+          <EditableLeadCell
+            key={i}
+            field={f}
+            editable={hasRealLead}
+            highlighted={hasRealLead && f.matches && highlightedField && f.matches.includes(highlightedField)}
+            scaledFont={scaledFont}
+            onCommit={(nextValue) => {
+              if (!hasRealLead) return;
+              commitLeadEdit(ctxLead, f.editKind, nextValue, actions.updateField);
+            }}
+          />
         ))}
       </div>
 
@@ -937,16 +1106,32 @@ function MspInlineBadge({ covered }) {
 }
 
 function SourcesRow({ sources }) {
+  const { actions } = useLead();
   if (!sources || sources.length === 0) return null;
+
+  // Normalize: accept plain strings (legacy) or { label, field } objects.
+  const items = sources.map((s) =>
+    typeof s === "string" ? { label: s, field: null } : s
+  );
+
   return (
     <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
-      {sources.map((s, i) => (
-        <span key={i} style={{
-          fontFamily: T.mono, fontSize: 8, letterSpacing: "0.04em", textTransform: "uppercase",
-          padding: "1px 5px", borderRadius: 6,
-          background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.45)",
-          border: "1px solid rgba(255,255,255,0.08)",
-        }}>{s}</span>
+      {items.map((s, i) => (
+        <span
+          key={i}
+          onMouseEnter={() => { if (s.field) actions.highlightField(s.field); }}
+          onMouseLeave={() => actions.highlightField(null)}
+          style={{
+            fontFamily: T.mono, fontSize: 8, letterSpacing: "0.04em", textTransform: "uppercase",
+            padding: "1px 5px", borderRadius: 6,
+            background: "rgba(255,255,255,0.03)", color: "rgba(255,255,255,0.45)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            cursor: s.field ? "pointer" : "default",
+            transition: "background 160ms ease, color 160ms ease",
+          }}
+        >
+          {s.label}
+        </span>
       ))}
     </div>
   );
@@ -1540,10 +1725,24 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
   const renderDesktopCopilot = () => {
     const resp = aiResponses[shownResponses - 1];
+    // Each pill carries a `field` identifier that maps back to a LeadContext
+    // field name. Hovering the pill highlights the matching cell in
+    // LeadContextPanel (spec §A3). When no underlying lead field applies
+    // (e.g. a plan ID), field is null and the pill is a plain label.
     const sourcesByTrigger = {
-      "what plans would cover my Eliquis": ["ZIP 33024", "Rx: Eliquis", "Coverage: Original Medicare"],
-      "Dr. Patel at Baptist Health": ["PCP: Dr. Patel", "Plan: Humana S5884-065"],
-      "what about dental": ["ZIP 33024", "Coverage gap: dental"],
+      "what plans would cover my Eliquis": [
+        { label: "ZIP 33024", field: "address" },
+        { label: "Rx: Eliquis", field: "medications" },
+        { label: "Coverage: Original Medicare", field: "coverage" },
+      ],
+      "Dr. Patel at Baptist Health": [
+        { label: "PCP: Dr. Patel", field: "providers" },
+        { label: "Plan: Humana S5884-065", field: null },
+      ],
+      "what about dental": [
+        { label: "ZIP 33024", field: "address" },
+        { label: "Coverage gap: dental", field: "coverage" },
+      ],
     };
     const sources = sourcesByTrigger[resp.trigger];
     return (

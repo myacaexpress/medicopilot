@@ -1,11 +1,14 @@
 import MacOSDesktopMockup from './MediCopilot_macOS_Mockup'
 import { LeadProvider } from './lead/LeadContext.jsx'
+import { ToastProvider } from './ui/Toast.jsx'
 
 function App() {
   return (
-    <LeadProvider>
-      <MacOSDesktopMockup />
-    </LeadProvider>
+    <ToastProvider>
+      <LeadProvider>
+        <MacOSDesktopMockup />
+      </LeadProvider>
+    </ToastProvider>
   )
 }
 

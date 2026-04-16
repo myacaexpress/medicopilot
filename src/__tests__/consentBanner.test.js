@@ -1,7 +1,7 @@
 /**
  * Tests for the consent banner hook logic.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { consentPolicy } from "../data/compliance/states.js";
 
 describe("consentPolicy", () => {
