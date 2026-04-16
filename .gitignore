@@ -5,3 +5,4 @@ dist
 
 # Sandbox / session artifacts — not part of the repo
 .outbox/
+.vercel
