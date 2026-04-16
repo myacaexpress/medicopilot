@@ -13,6 +13,9 @@ import { extractLeadFromImage, extractLeadFromText } from "./capture/extractLead
 import { useConsentBanner } from "./capture/useConsentBanner.js";
 import { ConsentBanner } from "./capture/ConsentBanner.jsx";
 import { useToast } from "./ui/Toast.jsx";
+import { useLiveAudio } from "./audio/index.js";
+
+const BACKEND_WSS_URL = import.meta.env.VITE_BACKEND_WSS_URL || null;
 
 const T = {
   teal: "#007B7F", tealDark: "#004D50", tealLight: "#1A9EA2",
@@ -95,16 +98,47 @@ function useResizable(iw, ih, minW = 320, minH = 400) {
 }
 
 // ─── Audio waveform animation ───
-function AudioWave({ active, color = T.teal, bars = 5 }) {
+// When `analyser` (an AnalyserNode) is provided, bar heights are driven by
+// real-time frequency data via requestAnimationFrame. Otherwise the bars
+// fall back to a CSS keyframe animation for the demo / muted state.
+function AudioWave({ active, color = T.teal, bars = 5, analyser = null }) {
+  const barRefs = useRef([]);
+
+  useEffect(() => {
+    if (!analyser || !active) return;
+    const fftBins = analyser.frequencyBinCount;
+    if (!fftBins) return;
+    const data = new Uint8Array(fftBins);
+    const span = Math.max(1, Math.floor(fftBins / bars));
+    let raf = 0;
+    const tick = () => {
+      analyser.getByteFrequencyData(data);
+      for (let i = 0; i < bars; i++) {
+        let sum = 0;
+        for (let j = 0; j < span; j++) sum += data[i * span + j] || 0;
+        const level = sum / span / 255; // 0..1
+        const h = Math.max(2, Math.round(level * 14));
+        const el = barRefs.current[i];
+        if (el) {
+          el.style.height = `${h}px`;
+          el.style.animation = "none";
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [analyser, active, bars]);
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 2, height: 16 }}>
       {Array.from({ length: bars }).map((_, i) => (
-        <div key={i} style={{
+        <div key={i} ref={el => (barRefs.current[i] = el)} style={{
           width: 2, borderRadius: 1,
           background: active ? color : "rgba(255,255,255,0.15)",
           height: active ? `${6 + Math.sin(Date.now() / 200 + i * 1.2) * 5}px` : 4,
           animation: active ? `wave${i} 0.6s ease-in-out ${i * 0.1}s infinite alternate` : "none",
-          transition: "height 0.15s ease",
+          transition: "height 0.08s ease",
         }} />
       ))}
       <style>{`
@@ -138,6 +172,67 @@ function ConfidencePill({ level }) {
       border: `1px solid ${s.bd}`, background: s.bg, color: s.c, whiteSpace: "nowrap",
     }}>{s.label}</span>
   );
+}
+
+// ─── Live-transcript adapter ───
+// Server emits `{ type, sessionId, final, speaker, text, ts, redactionCounts }`.
+// Render code expects `{ time, speaker, text, isQuestion }` where speaker is
+// "client" or "agent" (mockup convention). Diarization gives us a numeric
+// speaker index — for the demo we map even → agent, odd → client. Refining
+// this requires channel-split audio (P3) and isn't worth it now.
+function mapLiveTranscripts(transcripts) {
+  return transcripts.map((u, i) => {
+    const ts = u.ts ? new Date(u.ts) : null;
+    const time = ts && !Number.isNaN(ts.getTime())
+      ? `${String(ts.getMinutes()).padStart(2, "0")}:${String(ts.getSeconds()).padStart(2, "0")}`
+      : `${String(Math.floor(i / 6)).padStart(2, "0")}:${String((i * 10) % 60).padStart(2, "0")}`;
+    const speakerNum = typeof u.speaker === "number" ? u.speaker : 0;
+    const speaker = speakerNum % 2 === 0 ? "agent" : "client";
+    const text = u.text || "";
+    const isQuestion = /\?\s*$/.test(text);
+    return { time, speaker, text, isQuestion };
+  });
+}
+
+// Surface stream/mic errors via the toast system. Tracks the last shown
+// error code so a single transient blip doesn't fire the same toast twice.
+function useAudioErrorToasts({ noKeyError, micError, streamError }) {
+  const toast = useToast();
+  const lastShownRef = useRef({ key: null });
+  useEffect(() => {
+    if (noKeyError) {
+      const key = "no_api_key";
+      if (lastShownRef.current.key === key) return;
+      lastShownRef.current.key = key;
+      toast.show({
+        kind: "error",
+        title: "Live transcription unavailable",
+        detail: "Server is missing DEEPGRAM_API_KEY. Falling back to demo transcript.",
+      });
+      return;
+    }
+    if (micError) {
+      const key = "mic_error";
+      if (lastShownRef.current.key === key) return;
+      lastShownRef.current.key = key;
+      toast.show({
+        kind: "warn",
+        title: "Mic unavailable",
+        detail: micError.message || "Could not access microphone.",
+      });
+      return;
+    }
+    if (streamError && streamError.code !== "no_api_key") {
+      const key = `stream_${streamError.code}`;
+      if (lastShownRef.current.key === key) return;
+      lastShownRef.current.key = key;
+      toast.show({
+        kind: "warn",
+        title: "Live audio interrupted",
+        detail: streamError.message || streamError.code,
+      });
+    }
+  }, [noKeyError, micError, streamError, toast]);
 }
 
 function RecordingPill({ audioOn }) {
@@ -1293,6 +1388,16 @@ function MobileLayout() {
   const opacity = 0.88;
   const scaledFont = (base) => base;
 
+  // Live audio pipeline. When VITE_BACKEND_WSS_URL isn't set the hook is a
+  // no-op and `transcripts` stays empty — renderers fall back to the demo.
+  const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn });
+  useAudioErrorToasts(liveAudio);
+  const liveLines = mapLiveTranscripts(liveAudio.transcripts);
+  const usingLive = liveLines.length > 0;
+  const renderedTranscript = usingLive
+    ? liveLines
+    : transcriptLines.slice(0, visibleTranscript);
+
   useEffect(() => {
     const iv = setInterval(() => setTick(t => t + 1), 300);
     return () => clearInterval(iv);
@@ -1377,9 +1482,11 @@ function MobileLayout() {
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
         <Volume2 size={12} color="rgba(255,255,255,0.2)" />
         <span style={{ fontFamily: T.display, fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Live Transcript</span>
+        {usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
+        {!usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
         {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)", marginLeft: "auto" }}>Five9 — Maria Garcia</span>}
       </div>
-      {transcriptLines.slice(0, visibleTranscript).map((line, i) => (
+      {renderedTranscript.map((line, i) => (
         <div key={i} style={{ display: "flex", gap: 8, padding: "6px 0", alignItems: "flex-start", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
           <span style={{ fontFamily: T.mono, fontSize: 10, color: "rgba(255,255,255,0.15)", minWidth: 32 }}>{line.time}</span>
           <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, minWidth: 40, color: line.speaker === "client" ? T.coral : "rgba(255,255,255,0.3)" }}>
@@ -1449,8 +1556,8 @@ function MobileLayout() {
     <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "rgba(0,40,42,0.5)", borderBottom: "1px solid rgba(0,123,127,0.08)", flexShrink: 0, flexWrap: "wrap" }}>
       <button onClick={() => setAudioOn(!audioOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
         {audioOn ? <Volume2 size={12} color="#34C77B" /> : <MicOff size={12} color="rgba(255,255,255,0.3)" />}
-        <AudioWave active={audioOn} color="#34C77B" bars={4} />
-        <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: audioOn ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn ? "Listening" : "Muted"}</span>
+        <AudioWave active={audioOn} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
+        <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: audioOn ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn ? (liveAudio.live ? "Listening" : audioOn && BACKEND_WSS_URL ? "Connecting" : "Listening") : "Muted"}</span>
       </button>
       <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? "rgba(0,123,127,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
         <Monitor size={12} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
@@ -1615,6 +1722,18 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const [splitPct, setSplitPct] = useState(50);
   const splitContainerRef = useRef(null);
   const splitDragging = useRef(false);
+
+  // Live audio pipeline (see MobileLayout for the matching wiring).
+  const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn });
+  useAudioErrorToasts(liveAudio);
+  const liveLines = mapLiveTranscripts(liveAudio.transcripts);
+  const usingLive = liveLines.length > 0;
+  const renderedTranscript = usingLive
+    ? liveLines
+    : transcriptLines.slice(0, visibleTranscript);
+  const latestTranscriptText = usingLive
+    ? liveLines[liveLines.length - 1].text
+    : transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text;
   const collapsed = useDraggable(620, 55);
   const expanded = useDraggable(560, 30);
   const hidden = useDraggable(820, 55);
@@ -1706,9 +1825,11 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
         <Volume2 size={10} color="rgba(255,255,255,0.2)" />
         <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Live Transcript</span>
+        {usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
+        {!usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
         {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)", marginLeft: "auto" }}>Five9 — Maria Garcia, 33024</span>}
       </div>
-      {transcriptLines.slice(0, visibleTranscript).map((line, i) => (
+      {renderedTranscript.map((line, i) => (
         <div key={i} style={{ display: "flex", gap: 8, padding: "3px 0", alignItems: "flex-start" }}>
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.15)", minWidth: 28 }}>{line.time}</span>
           <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, minWidth: 40, color: line.speaker === "client" ? T.coral : "rgba(255,255,255,0.3)" }}>
@@ -1854,7 +1975,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         }}>
           <Eye size={12} color={T.teal} />
           <span style={{ fontFamily: T.display, fontWeight: 600, fontSize: 10, color: T.teal }}>TriBe</span>
-          {audioOn && <AudioWave active bars={3} />}
+          {audioOn && <AudioWave active bars={3} analyser={liveAudio.analyser} />}
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.3)" }}>⌘⇧S</span>
         </button>
       </div>
@@ -1882,7 +2003,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)", borderRadius: 6 }}>
             {audioOn ? <Volume2 size={11} color="#34C77B" /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
-            <AudioWave active={audioOn} color="#34C77B" bars={4} />
+            <AudioWave active={audioOn} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", borderRadius: 6 }}>
             <Monitor size={11} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
@@ -1909,7 +2030,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", marginBottom: 6, background: "rgba(255,255,255,0.03)", borderRadius: 6, borderLeft: "2px solid rgba(52,199,123,0.4)" }}>
             <Volume2 size={10} color="rgba(255,255,255,0.3)" />
             <span style={{ fontFamily: T.body, fontStyle: "italic", fontSize: scaledFont(11), color: "rgba(255,255,255,0.5)", flex: 1 }}>
-              "{transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text.slice(0, 65)}..."
+              "{latestTranscriptText.slice(0, 65)}{latestTranscriptText.length > 65 ? "..." : ""}"
             </span>
           </div>
           {/* Say this: preview */}
@@ -2026,8 +2147,8 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         <div data-no-drag="true" style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderBottom: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }}>
           <button onClick={() => setAudioOn(!audioOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
             {audioOn ? <Volume2 size={11} color="#34C77B" /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
-            <AudioWave active={audioOn} color="#34C77B" bars={4} />
-            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: audioOn ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn ? "Listening" : "Muted"}</span>
+            <AudioWave active={audioOn} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: audioOn ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn ? (liveAudio.live ? "Listening" : (BACKEND_WSS_URL ? "Connecting" : "Listening")) : "Muted"}</span>
           </button>
           <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? "rgba(0,123,127,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
             <Monitor size={11} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />

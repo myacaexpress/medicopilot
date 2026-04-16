@@ -17,6 +17,8 @@ const required = [];
  *   logLevel: "fatal"|"error"|"warn"|"info"|"debug"|"trace",
  *   version: string,
  *   corsOrigin: string,
+ *   deepgramApiKey: string|null,
+ *   deepgramSampleRate: number,
  * }} Env */
 
 /** @returns {Env} */
@@ -31,6 +33,8 @@ export function loadEnv() {
     ),
     version: process.env.APP_VERSION || "0.1.0-dev",
     corsOrigin: process.env.CORS_ORIGIN || "*",
+    deepgramApiKey: process.env.DEEPGRAM_API_KEY || null,
+    deepgramSampleRate: Number(process.env.DEEPGRAM_SAMPLE_RATE) || 16000,
   };
 
   const missing = required.filter((k) => !process.env[k]);
