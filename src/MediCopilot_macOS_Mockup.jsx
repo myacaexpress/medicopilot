@@ -1264,6 +1264,7 @@ function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
 function MspInlineBadge({ covered, onClick }) {
   const interactive = typeof onClick === "function" && !covered;
   const handleClick = (e) => {
+    console.log("[MspInlineBadge] click", { covered, interactive, hasOnClick: typeof onClick === "function" });
     if (!interactive) return;
     e.stopPropagation();
     onClick();
@@ -1416,7 +1417,7 @@ function Five9Window() {
 //  SHARED: AI Response Card
 // ═══════════════════════════════════════
 
-function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsertScript, insertedScripts }) {
+function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsertScript, insertedScripts, mspCovered }) {
   // Augment the visible response copy when the agent has clicked a
   // compliance pill (tier 4). Tracks which scripts were inserted so the
   // card can show a small "+ MSP script" attribution under the body.
@@ -1460,7 +1461,7 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsert
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <div style={{ fontFamily: T.display, fontSize: scaledFont(11), fontWeight: 600, color: T.white }}>{p.name}</div>
                   <MspInlineBadge
-                    covered={p.mspCovered !== false}
+                    covered={mspCovered === true}
                     onClick={onInsertScript ? () => onInsertScript("msp") : undefined}
                   />
                 </div>
@@ -1551,6 +1552,7 @@ function MobileLayout() {
   }, [activeCardKey]);
 
   const handleInsertScript = useCallback((id) => {
+    console.log("[Mobile] handleInsertScript", id);
     if (!id || !COMPLIANCE_SCRIPTS[id]) return;
     setInsertedScripts((prev) => {
       if (prev.has(id)) return prev;
@@ -1639,6 +1641,7 @@ function MobileLayout() {
           screenOn={screenOn}
           onInsertScript={isActive ? handleInsertScript : undefined}
           insertedScripts={isActive ? insertedScripts : null}
+          mspCovered={peclItems.find((it) => it.id === "msp")?.done === true}
         />
         );
       })}
@@ -1985,6 +1988,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   }, [activeCardKey]);
 
   const handleInsertScript = useCallback((id) => {
+    console.log("[Desktop] handleInsertScript", id);
     if (!id || !COMPLIANCE_SCRIPTS[id]) return;
     setInsertedScripts((prev) => {
       if (prev.has(id)) return prev;
