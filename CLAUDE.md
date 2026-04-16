@@ -16,7 +16,7 @@ If you read CLAUDE.md + PRD + ui-final-spec.md (in that order), you should be pr
 
 ## Current phase
 
-**P0 Foundations.** Foundational scaffolding — repo hygiene, env templates, data extraction from the monolith, v1-demo snapshot preservation. No real integrations yet; the current deploy is still the interactive mockup at [medicopilot.vercel.app](https://medicopilot.vercel.app).
+**P1 OCR MVP (web).** Real `getDisplayMedia` + Claude Vision extraction wired into the CaptureLeadModal. LeadProvider context manages the active lead with localStorage persistence. Vercel serverless functions at `api/extract-lead` (vision) and `api/extract-lead-text` (paste). Consent banner, mobile photo fallback, and paste fallback all functional. Tests: 29 passing (Vitest).
 
 The frozen v1 snapshot is tagged `v1-demo` and served independently from the primary deploy. Do not remove that tag.
 
@@ -71,10 +71,22 @@ All secrets live in environment variables — **never in the client bundle**. Se
 │   ├── ui-mockup.html            — static HTML references
 │   └── ui-integrated-mockup.html
 ├── src/
-│   ├── App.jsx                   — entry
+│   ├── App.jsx                   — entry (wraps with LeadProvider)
 │   ├── main.jsx
 │   ├── index.css
 │   ├── MediCopilot_macOS_Mockup.jsx  — monolith (being broken up through P0→P2)
+│   ├── lead/                     — Lead state management (P1)
+│   │   └── LeadContext.jsx       — LeadProvider, useLead(), reducer, buildLeadFromExtraction
+│   ├── capture/                  — Capture primitives (P1)
+│   │   ├── index.js              — barrel export
+│   │   ├── useScreenCapture.js   — getDisplayMedia + frame grab + cropToBase64
+│   │   ├── extractLeadFromImage.js — API client for vision + text extraction
+│   │   ├── useConsentBanner.js   — consent state hook (sessionStorage gate)
+│   │   └── ConsentBanner.jsx     — recording consent banner UI
+│   ├── __tests__/                — Vitest tests
+│   │   ├── leadContext.test.js   — reducer + helpers
+│   │   ├── dataShape.test.js     — mock data shape validation
+│   │   └── consentBanner.test.js — consent policy logic
 │   └── data/                     — extracted mock data modules (P0)
 │       ├── leads.js              — MOCK_LEADS + RECENT_LEADS
 │       ├── transcript.js         — simulated transcript lines
@@ -85,9 +97,9 @@ All secrets live in environment variables — **never in the client bundle**. Se
 │       │   └── seed.json
 │       └── compliance/
 │           └── states.js         — two-party-consent state list
-├── api/                          — Vercel Edge Functions (P1+)
-│   ├── extract-lead.ts           — vision OCR (P1)
-│   ├── extract-lead-text.ts      — paste-parse (P1)
+├── api/                          — Vercel Serverless Functions (P1+)
+│   ├── extract-lead.js           — vision OCR via Claude Sonnet (P1)
+│   ├── extract-lead-text.js      — paste-parse via Claude Haiku (P1)
 │   └── auth/                     — SMS-OTP endpoints (P2)
 ├── server/                       — Fastify app (P2+)
 └── src-tauri/                    — Tauri wrapper (P4)
@@ -144,10 +156,11 @@ npm run dev       # Vite dev server on :5173
 npm run build     # production build to dist/
 npm run preview   # preview the prod build locally
 npm run lint      # ESLint
+npm test          # Vitest (29 tests)
+npm run test:watch # Vitest in watch mode
 ```
 
 Planned scripts (per phase):
-- `npm run test` (Vitest, P0)
 - `npm run typecheck` (P0 — JSDoc first, full TS at P2)
 - `npm run server:dev` (Fastify, P2)
 - `npm run tauri:dev` (P4)

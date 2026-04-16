@@ -7,6 +7,11 @@ import {
   aiResponses,
   DEFAULT_PECL_ITEMS,
 } from "./data/index.js";
+import { useLead, buildLeadFromExtraction, makeField } from "./lead/LeadContext.jsx";
+import { useScreenCapture } from "./capture/useScreenCapture.js";
+import { extractLeadFromImage, extractLeadFromText } from "./capture/extractLeadFromImage.js";
+import { useConsentBanner } from "./capture/useConsentBanner.js";
+import { ConsentBanner } from "./capture/ConsentBanner.jsx";
 
 const T = {
   teal: "#007B7F", tealDark: "#004D50", tealLight: "#1A9EA2",
@@ -221,78 +226,175 @@ function SwitchLeadModal({ activeId, onPick, onClose }) {
 }
 
 function CaptureLeadModal({ onCommit, onClose }) {
-  const [stage, setStage] = useState("choose"); // choose | selecting | extracting | review
-  const [source, setSource] = useState(null); // "region" | "screen" | "manual"
-  const [progress, setProgress] = useState(0);
+  // choose | capturing | selecting | extracting | review | paste | error
+  const [stage, setStage] = useState("choose");
   const [extracted, setExtracted] = useState(null);
+  const [error, setError] = useState(null);
+  const [pasteText, setPasteText] = useState("");
+
+  // Real screen capture hook
+  const screen = useScreenCapture();
+
+  // Consent banner (derive state from lead context if available)
+  const { lead } = useLead();
+  const leadState = lead?.fields?.address?.v?.state;
+  const consent = useConsentBanner({ leadStateCode: leadState });
+
+  // Marquee selection state (user drags on the captured frame)
   const [marquee, setMarquee] = useState({ x: 0, y: 0, w: 0, h: 0 });
-  const [marqueeDone, setMarqueeDone] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const frameRef = useRef(null);
 
-  // Animate the marquee drawing in the "selecting" stage (mock drag)
-  useEffect(() => {
-    if (stage !== "selecting") return;
-    setMarqueeDone(false);
-    const target = { x: 48, y: 80, w: 310, h: 150 };
-    const startX = 78, startY = 120;
-    setMarquee({ x: startX, y: startY, w: 0, h: 0 });
-    let t = 0;
-    const iv = setInterval(() => {
-      t += 1;
-      const p = Math.min(t / 18, 1);
-      setMarquee({
-        x: startX - (startX - target.x) * p,
-        y: startY - (startY - target.y) * p,
-        w: target.w * p,
-        h: target.h * p,
-      });
-      if (p >= 1) {
-        clearInterval(iv);
-        setMarqueeDone(true);
-      }
-    }, 40);
-    return () => clearInterval(iv);
-  }, [stage]);
-
-  useEffect(() => {
-    if (stage !== "extracting") return;
-    setProgress(0);
-    const iv = setInterval(() => {
-      setProgress(p => {
-        const np = p + 12;
-        if (np >= 100) {
-          clearInterval(iv);
-          setExtracted({
-            Name: { v: "Harold Weaver", pill: "high" },
-            DOB: { v: "Jul 09, 1955", pill: "medium" },
-            Phone: { v: "(786) 555-0319", pill: "high" },
-            "Address · ZIP": { v: "Hialeah, FL 33013", pill: "medium" },
-            Coverage: { v: "Original Medicare (Part A only)", pill: "low" },
-          });
-          setStage("review");
-          return 100;
-        }
-        return np;
-      });
-    }, 180);
-    return () => clearInterval(iv);
-  }, [stage]);
-
-  const startExtract = (src) => {
-    setSource(src);
+  const startExtract = async (src) => {
+    setError(null);
     if (src === "manual") {
       setExtracted({
-        Name: { v: "", pill: "low" },
-        DOB: { v: "", pill: "low" },
-        Phone: { v: "", pill: "low" },
-        "Address · ZIP": { v: "", pill: "low" },
-        Coverage: { v: "", pill: "low" },
+        firstName: { v: "", confidence: "low" },
+        lastName: { v: "", confidence: "low" },
+        dob: { v: "", confidence: "low" },
+        phone: { v: "", confidence: "low" },
+        address: { v: "", confidence: "low" },
+        coverage: { v: "", confidence: "low" },
       });
       setStage("review");
-    } else if (src === "region") {
-      setStage("selecting");
-    } else {
-      setStage("extracting");
+    } else if (src === "paste") {
+      setPasteText("");
+      setStage("paste");
+    } else if (src === "region" || src === "screen") {
+      // Use real getDisplayMedia
+      await screen.requestCapture();
     }
+  };
+
+  // When screen capture completes, move to selecting stage
+  useEffect(() => {
+    if (screen.status === "captured" && screen.capturedFrame) {
+      setMarquee({ x: 0, y: 0, w: 0, h: 0 });
+      setStage("selecting");
+    } else if (screen.status === "denied") {
+      setError("Screen access denied. Enable in browser settings or enter manually.");
+      setStage("error");
+    } else if (screen.status === "unsupported") {
+      setError("Screen capture is not supported on this device. Use photo upload or paste instead.");
+      setStage("error");
+    }
+  }, [screen.status, screen.capturedFrame]);
+
+  // Mouse handlers for marquee drawing on the captured frame
+  const handleFrameMouseDown = (e) => {
+    if (!frameRef.current) return;
+    const rect = frameRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setDragStart({ x, y });
+    setMarquee({ x, y, w: 0, h: 0 });
+    setDragging(true);
+  };
+  const handleFrameMouseMove = (e) => {
+    if (!dragging || !frameRef.current) return;
+    const rect = frameRef.current.getBoundingClientRect();
+    const cx = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const cy = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+    setMarquee({
+      x: Math.min(dragStart.x, cx),
+      y: Math.min(dragStart.y, cy),
+      w: Math.abs(cx - dragStart.x),
+      h: Math.abs(cy - dragStart.y),
+    });
+  };
+  const handleFrameMouseUp = () => {
+    setDragging(false);
+  };
+
+  const marqueeDone = !dragging && marquee.w > 10 && marquee.h > 10;
+
+  // Run extraction on the cropped region
+  const handleExtract = async () => {
+    if (!marqueeDone) return;
+    setStage("extracting");
+    setError(null);
+
+    // Map marquee coordinates from display space to full-resolution frame space
+    const el = frameRef.current;
+    if (!el) return;
+    const displayW = el.clientWidth;
+    const displayH = el.clientHeight;
+    const scaleX = screen.frameWidth / displayW;
+    const scaleY = screen.frameHeight / displayH;
+
+    const cropRect = {
+      x: marquee.x * scaleX,
+      y: marquee.y * scaleY,
+      w: marquee.w * scaleX,
+      h: marquee.h * scaleY,
+    };
+
+    const base64 = screen.cropToBase64(cropRect);
+    if (!base64) {
+      setError("Failed to crop region. Try again.");
+      setStage("error");
+      return;
+    }
+
+    const result = await extractLeadFromImage(base64);
+    if (result.kind === "success") {
+      setExtracted(result.fields);
+      setStage("review");
+    } else {
+      setError(
+        result.kind === "empty" ? "No lead info found. Try again or paste manually." :
+        result.kind === "denied" ? "API access denied. Check configuration." :
+        result.error || "Extraction failed. Retry."
+      );
+      setStage("error");
+    }
+  };
+
+  // Handle paste extraction
+  const handlePasteExtract = async () => {
+    if (!pasteText.trim()) return;
+    setStage("extracting");
+    const result = await extractLeadFromText(pasteText);
+    if (result.kind === "success") {
+      setExtracted(result.fields);
+      setStage("review");
+    } else {
+      setError(result.error || "No lead info found in pasted text.");
+      setStage("error");
+    }
+  };
+
+  // Handle photo upload (mobile fallback)
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setStage("extracting");
+    setError(null);
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const result = await extractLeadFromImage(reader.result);
+      if (result.kind === "success") {
+        setExtracted(result.fields);
+        setStage("review");
+      } else {
+        setError(result.error || "No lead info found in photo.");
+        setStage("error");
+      }
+    };
+    reader.onerror = () => {
+      setError("Failed to read file.");
+      setStage("error");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Field labels for the review UI
+  const fieldLabels = {
+    firstName: "First Name", lastName: "Last Name", dob: "DOB",
+    phone: "Phone", address: "Address", coverage: "Coverage",
+    medications: "Medications", providers: "Providers",
   };
 
   return (
@@ -307,13 +409,20 @@ function CaptureLeadModal({ onCommit, onClose }) {
         border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14,
         boxShadow: "0 16px 48px rgba(0,0,0,0.5)", overflow: "hidden",
       }}>
+        {/* Consent banner */}
+        {consent.shouldShowBanner && (
+          <ConsentBanner isTwoParty={consent.isTwoParty} onDismiss={consent.dismiss} />
+        )}
+
         <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: T.teal }}>⊕ Capture lead</span>
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.3)" }}>
             {stage === "choose" && "· choose source"}
             {stage === "selecting" && "· drag to select a region"}
-            {stage === "extracting" && `· extracting from ${source === "region" ? "region" : "screen"}`}
+            {stage === "extracting" && "· extracting…"}
             {stage === "review" && "· review & commit"}
+            {stage === "paste" && "· paste lead info"}
+            {stage === "error" && "· error"}
           </span>
           <div style={{ flex: 1 }} />
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
@@ -322,106 +431,117 @@ function CaptureLeadModal({ onCommit, onClose }) {
         </div>
 
         {stage === "choose" && (
-          <div style={{ padding: 14, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            {[
-              { k: "region", icon: "◩", title: "Select region", sub: "Drag a box around any fields on screen" },
-              { k: "screen", icon: "🖥", title: "Full window", sub: "Grab the active Five9 / CRM window" },
-              { k: "manual", icon: "⌨", title: "Manual", sub: "Type the fields yourself" },
-            ].map(o => (
-              <button key={o.k} onClick={() => startExtract(o.k)} style={{
-                padding: "14px 10px", background: "rgba(255,255,255,0.03)",
+          <div style={{ padding: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              {[
+                { k: "region", icon: "◩", title: "Screen capture", sub: "Capture screen & drag a box around lead fields" },
+                { k: "manual", icon: "⌨", title: "Manual", sub: "Type the fields yourself" },
+              ].map(o => (
+                <button key={o.k} onClick={() => startExtract(o.k)} style={{
+                  padding: "14px 10px", background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10,
+                  cursor: "pointer", textAlign: "left", color: "#fff",
+                }}>
+                  <div style={{ fontSize: 22, marginBottom: 6 }}>{o.icon}</div>
+                  <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: "#fff" }}>{o.title}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 3, lineHeight: 1.35 }}>{o.sub}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button onClick={() => startExtract("paste")} style={{
+                padding: "10px 10px", background: "rgba(255,255,255,0.03)",
                 border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10,
                 cursor: "pointer", textAlign: "left", color: "#fff",
               }}>
-                <div style={{ fontSize: 22, marginBottom: 6 }}>{o.icon}</div>
-                <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: "#fff" }}>{o.title}</div>
-                <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 3, lineHeight: 1.35 }}>{o.sub}</div>
+                <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.8)" }}>📋 Paste text</div>
+                <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Paste from CRM or notes</div>
               </button>
-            ))}
+              <label style={{
+                padding: "10px 10px", background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10,
+                cursor: "pointer", textAlign: "left", color: "#fff",
+              }}>
+                <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.8)" }}>📷 Photo upload</div>
+                <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Snap a photo of the screen</div>
+                <input type="file" accept="image/*" capture="environment" onChange={handlePhotoUpload}
+                  style={{ display: "none" }} />
+              </label>
+            </div>
           </div>
         )}
 
-        {stage === "selecting" && (
+        {stage === "selecting" && screen.capturedFrame && (
           <div style={{ padding: 14 }}>
             <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.45)", marginBottom: 8 }}>
-              Crosshair active · dim layer covering desktop · drag to draw a region around the fields you want captured.
+              Drag to draw a region around the fields you want captured.
             </div>
-            {/* Mock "desktop" with a Five9 card underneath */}
-            <div style={{
-              position: "relative", height: 240, borderRadius: 10, overflow: "hidden",
-              background: "linear-gradient(135deg, #1a2230, #0d1520)",
-              border: "1px solid rgba(255,255,255,0.06)",
-              cursor: "crosshair",
-            }}>
-              {/* Faux Five9 lead card */}
-              <div style={{
-                position: "absolute", left: 32, top: 64, width: 340, padding: "12px 14px",
-                background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 8,
-              }}>
-                <div style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>Five9 · Inbound · 08:14</div>
-                <div style={{ fontFamily: T.body, fontSize: 11, color: "rgba(255,255,255,0.85)", lineHeight: 1.55 }}>
-                  <div><b>Caller:</b> Harold Weaver</div>
-                  <div><b>DOB:</b> 07/09/1955 · Age 70</div>
-                  <div><b>Phone:</b> (786) 555-0319</div>
-                  <div><b>Address:</b> Hialeah, FL 33013</div>
-                  <div><b>Coverage:</b> Medicare Part A only</div>
-                </div>
-              </div>
+            <div
+              ref={frameRef}
+              onMouseDown={handleFrameMouseDown}
+              onMouseMove={handleFrameMouseMove}
+              onMouseUp={handleFrameMouseUp}
+              onMouseLeave={handleFrameMouseUp}
+              style={{
+                position: "relative", height: 280, borderRadius: 10, overflow: "hidden",
+                border: "1px solid rgba(255,255,255,0.06)",
+                cursor: "crosshair", userSelect: "none",
+              }}
+            >
+              <img src={screen.capturedFrame} alt="Captured screen"
+                style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }}
+                draggable={false}
+              />
               {/* Dimming overlay with cut-out for marquee */}
-              <div style={{
-                position: "absolute", inset: 0,
-                background: "rgba(0,0,0,0.55)",
-                clipPath: `polygon(
-                  0 0, 100% 0, 100% 100%, 0 100%, 0 0,
-                  ${marquee.x}px ${marquee.y}px,
-                  ${marquee.x}px ${marquee.y + marquee.h}px,
-                  ${marquee.x + marquee.w}px ${marquee.y + marquee.h}px,
-                  ${marquee.x + marquee.w}px ${marquee.y}px,
-                  ${marquee.x}px ${marquee.y}px
-                )`,
-              }} />
-              {/* Marquee border */}
-              {(marquee.w > 0 || marquee.h > 0) && (
-                <div style={{
-                  position: "absolute",
-                  left: marquee.x, top: marquee.y,
-                  width: marquee.w, height: marquee.h,
-                  border: `1.5px dashed ${T.teal}`,
-                  boxShadow: "0 0 0 1px rgba(0,123,127,0.3), 0 8px 24px rgba(0,123,127,0.25)",
-                  background: "rgba(0,123,127,0.05)",
-                  pointerEvents: "none",
-                }}>
-                  {marqueeDone && (
-                    <div style={{
-                      position: "absolute", top: -20, left: 0,
-                      fontFamily: T.mono, fontSize: 9, color: T.teal,
-                      padding: "2px 6px", background: "rgba(0,123,127,0.15)", borderRadius: 3,
-                    }}>
-                      {Math.round(marquee.w)} × {Math.round(marquee.h)} · region locked
-                    </div>
-                  )}
-                </div>
-              )}
-              {/* Size label while drawing */}
-              {!marqueeDone && marquee.w > 0 && (
-                <div style={{
-                  position: "absolute",
-                  left: marquee.x + marquee.w + 6, top: marquee.y + marquee.h - 14,
-                  fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.7)",
-                  padding: "2px 6px", background: "rgba(0,0,0,0.6)", borderRadius: 3,
-                }}>
-                  {Math.round(marquee.w)} × {Math.round(marquee.h)}
-                </div>
+              {marquee.w > 0 && marquee.h > 0 && (
+                <>
+                  <div style={{
+                    position: "absolute", inset: 0,
+                    background: "rgba(0,0,0,0.55)",
+                    clipPath: `polygon(
+                      0 0, 100% 0, 100% 100%, 0 100%, 0 0,
+                      ${marquee.x}px ${marquee.y}px,
+                      ${marquee.x}px ${marquee.y + marquee.h}px,
+                      ${marquee.x + marquee.w}px ${marquee.y + marquee.h}px,
+                      ${marquee.x + marquee.w}px ${marquee.y}px,
+                      ${marquee.x}px ${marquee.y}px
+                    )`,
+                    pointerEvents: "none",
+                  }} />
+                  <div style={{
+                    position: "absolute",
+                    left: marquee.x, top: marquee.y,
+                    width: marquee.w, height: marquee.h,
+                    border: `2px dashed ${T.tealLight}`,
+                    boxShadow: "0 0 0 1px rgba(0,123,127,0.3), 0 8px 24px rgba(0,123,127,0.25)",
+                    background: "rgba(0,123,127,0.05)",
+                    pointerEvents: "none",
+                  }}>
+                    {marqueeDone && (
+                      <div style={{
+                        position: "absolute", top: -18, left: 0,
+                        fontFamily: T.mono, fontSize: 9, color: T.teal,
+                        padding: "1px 5px", background: "rgba(0,123,127,0.15)", borderRadius: 3,
+                      }}>
+                        {Math.round(marquee.w)} × {Math.round(marquee.h)}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button onClick={() => setStage("choose")} style={{
+              <button onClick={() => { screen.reset(); setStage("choose"); }} style={{
                 flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.04)",
                 border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
                 fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
               }}>Back</button>
-              <button disabled={!marqueeDone} onClick={() => setStage("extracting")} style={{
+              <button onClick={() => { setMarquee({ x: 0, y: 0, w: 0, h: 0 }); }} style={{
+                padding: "9px 12px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Retry</button>
+              <button disabled={!marqueeDone} onClick={handleExtract} style={{
                 flex: 2, padding: "9px 12px",
                 background: marqueeDone ? "linear-gradient(135deg, #007B7F, #004D50)" : "rgba(255,255,255,0.04)",
                 border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
@@ -429,7 +549,43 @@ function CaptureLeadModal({ onCommit, onClose }) {
                 color: marqueeDone ? "#fff" : "rgba(255,255,255,0.3)",
                 cursor: marqueeDone ? "pointer" : "not-allowed",
                 letterSpacing: "0.04em", textTransform: "uppercase",
-              }}>{marqueeDone ? "✓ Capture region" : "Drawing…"}</button>
+              }}>✦ Extract</button>
+            </div>
+          </div>
+        )}
+
+        {stage === "paste" && (
+          <div style={{ padding: 14 }}>
+            <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.45)", marginBottom: 8 }}>
+              Paste lead info from your CRM, email, or notes. AI will parse the fields.
+            </div>
+            <textarea
+              autoFocus
+              value={pasteText}
+              onChange={e => setPasteText(e.target.value)}
+              placeholder="Paste lead information here…"
+              rows={6}
+              style={{
+                width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 8, padding: "8px 10px", color: "#fff", outline: "none", resize: "vertical",
+                fontFamily: T.body, fontSize: 12, lineHeight: 1.5,
+              }}
+            />
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button onClick={() => setStage("choose")} style={{
+                flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Back</button>
+              <button disabled={!pasteText.trim()} onClick={handlePasteExtract} style={{
+                flex: 2, padding: "9px 12px",
+                background: pasteText.trim() ? "linear-gradient(135deg, #007B7F, #004D50)" : "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11,
+                color: pasteText.trim() ? "#fff" : "rgba(255,255,255,0.3)",
+                cursor: pasteText.trim() ? "pointer" : "not-allowed",
+                letterSpacing: "0.04em", textTransform: "uppercase",
+              }}>✦ Extract from text</button>
             </div>
           </div>
         )}
@@ -437,15 +593,45 @@ function CaptureLeadModal({ onCommit, onClose }) {
         {stage === "extracting" && (
           <div style={{ padding: 24, textAlign: "center" }}>
             <div style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 10 }}>
-              Claude Vision · parsing {source === "region" ? "selected region" : "screen capture"}…
+              Claude Vision · extracting lead fields…
             </div>
             <div style={{ height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden", marginBottom: 12 }}>
-              <div style={{ height: "100%", width: `${progress}%`, background: `linear-gradient(90deg, ${T.teal}, #34C77B)`, transition: "width 0.2s ease" }} />
+              <div style={{
+                height: "100%", width: "60%",
+                background: `linear-gradient(90deg, ${T.teal}, #34C77B)`,
+                animation: "extractPulse 1.5s ease-in-out infinite",
+              }} />
             </div>
             <div style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.35)" }}>
-              {progress < 30 && "Locating fields…"}
-              {progress >= 30 && progress < 70 && "Extracting name, DOB, ZIP, coverage…"}
-              {progress >= 70 && "Scoring confidence…"}
+              Sending to API…
+            </div>
+            <style>{`@keyframes extractPulse { 0%,100% { width: 30%; } 50% { width: 85%; } }`}</style>
+          </div>
+        )}
+
+        {stage === "error" && (
+          <div style={{ padding: 20, textAlign: "center" }}>
+            <div style={{
+              fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "#F5A623", marginBottom: 8,
+            }}>
+              {error}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <button onClick={() => { screen.reset(); setStage("choose"); }} style={{
+                padding: "9px 16px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Try again</button>
+              <button onClick={() => startExtract("paste")} style={{
+                padding: "9px 16px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Paste instead</button>
+              <button onClick={() => startExtract("manual")} style={{
+                padding: "9px 16px", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.6)", cursor: "pointer",
+              }}>Enter manually</button>
             </div>
           </div>
         )}
@@ -462,10 +648,15 @@ function CaptureLeadModal({ onCommit, onClose }) {
                   borderRadius: 8, padding: "8px 10px",
                   display: "flex", alignItems: "center", gap: 8,
                 }}>
-                  <div style={{ fontFamily: T.display, fontWeight: 600, fontSize: 9, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", width: 92 }}>{k}</div>
+                  <div style={{ fontFamily: T.display, fontWeight: 600, fontSize: 9, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", width: 92 }}>
+                    {fieldLabels[k] || k}
+                  </div>
                   <input
-                    value={f.v}
-                    onChange={e => setExtracted(prev => ({ ...prev, [k]: { ...f, v: e.target.value, pill: e.target.value ? "verified" : "low" } }))}
+                    value={typeof f.v === "object" ? JSON.stringify(f.v) : (f.v || "")}
+                    onChange={e => setExtracted(prev => ({
+                      ...prev,
+                      [k]: { ...f, v: e.target.value, confidence: e.target.value ? (f.confidence === "low" ? "medium" : f.confidence) : "low" }
+                    }))}
                     placeholder="—"
                     style={{
                       flex: 1, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
@@ -473,7 +664,7 @@ function CaptureLeadModal({ onCommit, onClose }) {
                       fontFamily: T.body, fontSize: 12,
                     }}
                   />
-                  <ConfidencePill level={f.pill} />
+                  <ConfidencePill level={f.confidence || f.pill || "medium"} />
                 </div>
               ))}
             </div>
@@ -499,25 +690,34 @@ function CaptureLeadModal({ onCommit, onClose }) {
 }
 
 function LeadContextPanel({ scaledFont = (x) => x }) {
+  const { lead: ctxLead, actions } = useLead();
   const [activeId, setActiveId] = useState("maria");
-  const [custom, setCustom] = useState(null); // a captured lead, replaces the catalog entry
   const [showSwitch, setShowSwitch] = useState(false);
   const [showCapture, setShowCapture] = useState(false);
 
-  const active = custom && custom.id === activeId ? custom : MOCK_LEADS[activeId];
+  // If we have a real lead from context, display it; otherwise fall back to mock data
+  const hasRealLead = ctxLead && ctxLead.fields;
+
+  // Convert context lead fields to the display format the panel expects
+  const active = hasRealLead ? {
+    id: ctxLead.id,
+    source: `Captured · ${ctxLead.source}`,
+    fields: [
+      ctxLead.fields.firstName && { k: "Name", v: `${ctxLead.fields.firstName?.v || ""} ${ctxLead.fields.lastName?.v || ""}`.trim(), pill: ctxLead.fields.firstName?.confidence || "medium" },
+      ctxLead.fields.dob && { k: "DOB", v: ctxLead.fields.dob.v, pill: ctxLead.fields.dob.confidence },
+      ctxLead.fields.phone && { k: "Phone", v: ctxLead.fields.phone.v, pill: ctxLead.fields.phone.confidence },
+      ctxLead.fields.address && { k: "Address · ZIP", v: typeof ctxLead.fields.address.v === "object" ? `${ctxLead.fields.address.v.city || ""}, ${ctxLead.fields.address.v.state || ""} ${ctxLead.fields.address.v.zip || ""}`.trim() : ctxLead.fields.address.v, pill: ctxLead.fields.address.confidence, wide: true },
+      ctxLead.fields.coverage && { k: "Coverage", v: ctxLead.fields.coverage.v, pill: ctxLead.fields.coverage.confidence },
+    ].filter(Boolean),
+  } : MOCK_LEADS[activeId];
+
   const fields = active.fields;
   const source = active.source;
 
   const handleCommitCapture = (extracted) => {
-    const id = "captured_" + Date.now();
-    const newLead = {
-      id, source: "Captured · Claude Vision",
-      fields: Object.entries(extracted).map(([k, f], i) => ({
-        k, v: f.v || "—", pill: f.pill, wide: k === "Address · ZIP",
-      })),
-    };
-    setCustom(newLead);
-    setActiveId(id);
+    // Build a real LeadContext from the extracted fields and dispatch to global state
+    const newLead = buildLeadFromExtraction(extracted, "vision");
+    actions.capture(newLead);
     setShowCapture(false);
   };
 
