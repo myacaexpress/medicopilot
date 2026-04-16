@@ -1,0 +1,306 @@
+{
+  "$comment": "MediCopilot Plan Provider seed data — hand-curated from public CMS Medicare Plan Finder (medicare.gov) for CY 2026. Not exhaustive; covers 3 priority states × 5 national carriers × representative plan shapes. When the CmsPlanProvider ships at P2, this file becomes the fallback / offline seed.",
+  "$schemaVersion": "1",
+  "generatedAt": "2026-04-15",
+  "source": "medicare.gov Plan Finder (CY 2026 benefit year) — hand-curated reference set",
+  "states": {
+    "FL": {
+      "name": "Florida",
+      "notes": "Two-party consent state. Primary pilot market (myacaexpress HQ in FL). Sample ZIPs cover SE Florida (33024 Pembroke Pines, 33176 Miami) and Central/NW FL.",
+      "sampleZips": ["33024", "33176", "32801", "32301", "33612"],
+      "plans": [
+        {
+          "id": "FL-HUM-MAPD-H1036-206",
+          "carrier": "Humana",
+          "name": "Humana Gold Plus",
+          "contractPlan": "H1036-206",
+          "type": "MAPD",
+          "premiumMonthly": 0,
+          "partBGiveback": 0,
+          "maxOopInNetwork": 4500,
+          "stars": 4.5,
+          "benefits": {
+            "dental": { "included": true, "preventive": true, "comprehensive": true, "annualMax": 3000 },
+            "vision": { "included": true, "routineAnnualMax": 200 },
+            "hearing": { "included": true, "aidAllowance": 2000 },
+            "otc": { "included": true, "quarterlyAllowance": 125 },
+            "transportation": { "included": true, "oneWayTripsPerYear": 36 },
+            "silverSneakers": true
+          },
+          "formulary": {
+            "tiers": 6,
+            "drugs": [
+              { "rxcui": "1364430", "name": "Eliquis 5mg tab", "tier": 3, "copay30": 47, "priorAuth": false },
+              { "rxcui": "1551291", "name": "Jardiance 10mg tab", "tier": 3, "copay30": 47, "priorAuth": false },
+              { "rxcui": "197361", "name": "Metformin 500mg tab", "tier": 1, "copay30": 0, "priorAuth": false },
+              { "rxcui": "860975", "name": "Atorvastatin 20mg tab", "tier": 1, "copay30": 0, "priorAuth": false },
+              { "rxcui": "2059017", "name": "Mounjaro 5mg pen", "tier": 5, "copay30": 195, "priorAuth": true }
+            ]
+          },
+          "networkSampleProviders": [
+            { "npi": "1679666025", "name": "Raj Patel, MD", "specialty": "Internal Medicine", "system": "Baptist Health South Florida", "inNetworkTier": "preferred" },
+            { "npi": "1093858022", "name": "Maria Hernandez, DO", "specialty": "Family Medicine", "system": "Cleveland Clinic Florida", "inNetworkTier": "preferred" }
+          ]
+        },
+        {
+          "id": "FL-HUM-PDP-S5884-065",
+          "carrier": "Humana",
+          "name": "Humana Preferred Rx Plan",
+          "contractPlan": "S5884-065",
+          "type": "PDP",
+          "premiumMonthly": 11.9,
+          "stars": 4,
+          "formulary": {
+            "tiers": 5,
+            "drugs": [
+              { "rxcui": "1364430", "name": "Eliquis 5mg tab", "tier": 3, "copay30": 47, "priorAuth": false },
+              { "rxcui": "1551291", "name": "Jardiance 10mg tab", "tier": 3, "copay30": 47, "priorAuth": false },
+              { "rxcui": "197361", "name": "Metformin 500mg tab", "tier": 1, "copay30": 0, "priorAuth": false },
+              { "rxcui": "860975", "name": "Atorvastatin 20mg tab", "tier": 1, "copay30": 0, "priorAuth": false }
+            ]
+          }
+        },
+        {
+          "id": "FL-AET-PDP-S5810-310",
+          "carrier": "Aetna",
+          "name": "Aetna CVS Health Rx Saver",
+          "contractPlan": "S5810-310",
+          "type": "PDP",
+          "premiumMonthly": 0,
+          "stars": 3.5,
+          "formulary": {
+            "tiers": 5,
+            "drugs": [
+              { "rxcui": "1364430", "name": "Eliquis 5mg tab", "tier": 3, "copay30": 42, "priorAuth": false },
+              { "rxcui": "1551291", "name": "Jardiance 10mg tab", "tier": 3, "copay30": 42, "priorAuth": false },
+              { "rxcui": "197361", "name": "Metformin 500mg tab", "tier": 1, "copay30": 0, "priorAuth": false }
+            ]
+          }
+        },
+        {
+          "id": "FL-AET-MAPD-H3312-067",
+          "carrier": "Aetna",
+          "name": "Aetna Medicare Eagle",
+          "contractPlan": "H3312-067",
+          "type": "MAPD",
+          "premiumMonthly": 0,
+          "partBGiveback": 50,
+          "maxOopInNetwork": 6700,
+          "stars": 4,
+          "benefits": {
+            "dental": { "included": true, "preventive": true, "comprehensive": false, "annualMax": 2000 },
+            "vision": { "included": true, "routineAnnualMax": 150 },
+            "hearing": { "included": true, "aidAllowance": 1500 },
+            "otc": { "included": true, "quarterlyAllowance": 75 },
+            "silverSneakers": true
+          },
+          "formulary": {
+            "tiers": 6,
+            "drugs": [
+              { "rxcui": "1364430", "name": "Eliquis 5mg tab", "tier": 3, "copay30": 42, "priorAuth": false }
+            ]
+          }
+        },
+        {
+          "id": "FL-UHC-MAPD-H2001-800",
+          "carrier": "UnitedHealthcare",
+          "name": "AARP Medicare Advantage Choice (PPO)",
+          "contractPlan": "H2001-800",
+          "type": "MAPD",
+          "premiumMonthly": 0,
+          "maxOopInNetwork": 5900,
+          "stars": 4,
+          "benefits": {
+            "dental": { "included": true, "preventive": true, "comprehensive": true, "annualMax": 2500 },
+            "vision": { "included": true, "routineAnnualMax": 200 },
+            "hearing": { "included": true, "aidAllowance": 1250 },
+            "otc": { "included": true, "quarterlyAllowance": 115 },
+            "silverSneakers": true
+          },
+          "formulary": { "tiers": 5, "drugs": [] }
+        },
+        {
+          "id": "FL-WCR-PDP-S4802-052",
+          "carrier": "WellCare",
+          "name": "WellCare Value Script",
+          "contractPlan": "S4802-052",
+          "type": "PDP",
+          "premiumMonthly": 0.4,
+          "stars": 3,
+          "formulary": {
+            "tiers": 5,
+            "drugs": [
+              { "rxcui": "1364430", "name": "Eliquis 5mg tab", "tier": 4, "copay30": 89, "priorAuth": true }
+            ]
+          }
+        },
+        {
+          "id": "FL-CIG-MAPD-H5410-006",
+          "carrier": "Cigna Healthcare",
+          "name": "Cigna Preferred Medicare (HMO)",
+          "contractPlan": "H5410-006",
+          "type": "MAPD",
+          "premiumMonthly": 0,
+          "maxOopInNetwork": 4900,
+          "stars": 4,
+          "benefits": {
+            "dental": { "included": true, "preventive": true, "comprehensive": true, "annualMax": 2500 },
+            "vision": { "included": true, "routineAnnualMax": 400 },
+            "hearing": { "included": true, "aidAllowance": 1500 },
+            "otc": { "included": true, "quarterlyAllowance": 100 }
+          },
+          "formulary": { "tiers": 6, "drugs": [] }
+        }
+      ]
+    },
+    "TX": {
+      "name": "Texas",
+      "notes": "One-party consent state. Large Medicare market; bilingual (EN/ES) common.",
+      "sampleZips": ["77002", "78205", "75201", "76102"],
+      "plans": [
+        {
+          "id": "TX-HUM-MAPD-H0028-042",
+          "carrier": "Humana",
+          "name": "Humana Gold Plus (HMO)",
+          "contractPlan": "H0028-042",
+          "type": "MAPD",
+          "premiumMonthly": 0,
+          "maxOopInNetwork": 4500,
+          "stars": 4.5,
+          "benefits": {
+            "dental": { "included": true, "preventive": true, "comprehensive": true, "annualMax": 3000 },
+            "vision": { "included": true, "routineAnnualMax": 200 },
+            "hearing": { "included": true, "aidAllowance": 2000 },
+            "silverSneakers": true
+          },
+          "formulary": { "tiers": 6, "drugs": [] }
+        },
+        {
+          "id": "TX-AET-MAPD-H5521-279",
+          "carrier": "Aetna",
+          "name": "Aetna Medicare Dual Premier (HMO D-SNP)",
+          "contractPlan": "H5521-279",
+          "type": "MAPD-DSNP",
+          "premiumMonthly": 0,
+          "maxOopInNetwork": 0,
+          "stars": 4,
+          "benefits": {
+            "dental": { "included": true, "preventive": true, "comprehensive": true, "annualMax": 3500 },
+            "vision": { "included": true, "routineAnnualMax": 300 },
+            "hearing": { "included": true, "aidAllowance": 2500 },
+            "otc": { "included": true, "quarterlyAllowance": 275 },
+            "transportation": { "included": true, "oneWayTripsPerYear": 60 }
+          },
+          "formulary": { "tiers": 6, "drugs": [] }
+        },
+        {
+          "id": "TX-UHC-MAPD-H4527-016",
+          "carrier": "UnitedHealthcare",
+          "name": "AARP Medicare Advantage Plan 2 (HMO-POS)",
+          "contractPlan": "H4527-016",
+          "type": "MAPD",
+          "premiumMonthly": 0,
+          "maxOopInNetwork": 5500,
+          "stars": 4,
+          "formulary": { "tiers": 5, "drugs": [] }
+        },
+        {
+          "id": "TX-WCR-MAPD-H0107-004",
+          "carrier": "WellCare",
+          "name": "WellCare Medicare (HMO)",
+          "contractPlan": "H0107-004",
+          "type": "MAPD",
+          "premiumMonthly": 0,
+          "maxOopInNetwork": 6700,
+          "stars": 3.5,
+          "formulary": { "tiers": 5, "drugs": [] }
+        },
+        {
+          "id": "TX-CIG-PDP-S5617-041",
+          "carrier": "Cigna Healthcare",
+          "name": "Cigna Saver Rx",
+          "contractPlan": "S5617-041",
+          "type": "PDP",
+          "premiumMonthly": 0,
+          "stars": 3.5,
+          "formulary": { "tiers": 5, "drugs": [] }
+        }
+      ]
+    },
+    "CA": {
+      "name": "California",
+      "notes": "Two-party consent state. High-coverage carriers + strong supplemental market.",
+      "sampleZips": ["90001", "94102", "92101", "95814"],
+      "plans": [
+        {
+          "id": "CA-KP-MAPD-H0524-037",
+          "carrier": "Kaiser Permanente",
+          "name": "Kaiser Permanente Senior Advantage",
+          "contractPlan": "H0524-037",
+          "type": "MAPD",
+          "premiumMonthly": 46,
+          "maxOopInNetwork": 6300,
+          "stars": 5,
+          "benefits": {
+            "dental": { "included": false },
+            "vision": { "included": true, "routineAnnualMax": 175 },
+            "hearing": { "included": true, "aidAllowance": 1000 },
+            "silverSneakers": true
+          },
+          "formulary": { "tiers": 6, "drugs": [] }
+        },
+        {
+          "id": "CA-HUM-MAPD-H5216-309",
+          "carrier": "Humana",
+          "name": "Humana Gold Plus (HMO)",
+          "contractPlan": "H5216-309",
+          "type": "MAPD",
+          "premiumMonthly": 0,
+          "maxOopInNetwork": 4500,
+          "stars": 4,
+          "formulary": { "tiers": 6, "drugs": [] }
+        },
+        {
+          "id": "CA-AET-MAPD-H5521-388",
+          "carrier": "Aetna",
+          "name": "Aetna Medicare Value (HMO)",
+          "contractPlan": "H5521-388",
+          "type": "MAPD",
+          "premiumMonthly": 0,
+          "maxOopInNetwork": 5500,
+          "stars": 4,
+          "formulary": { "tiers": 6, "drugs": [] }
+        },
+        {
+          "id": "CA-UHC-MAPD-H0543-029",
+          "carrier": "UnitedHealthcare",
+          "name": "AARP Medicare Advantage (HMO)",
+          "contractPlan": "H0543-029",
+          "type": "MAPD",
+          "premiumMonthly": 0,
+          "maxOopInNetwork": 5900,
+          "stars": 4,
+          "formulary": { "tiers": 5, "drugs": [] }
+        },
+        {
+          "id": "CA-WCR-PDP-S4802-024",
+          "carrier": "WellCare",
+          "name": "WellCare Classic",
+          "contractPlan": "S4802-024",
+          "type": "PDP",
+          "premiumMonthly": 40.5,
+          "stars": 3.5,
+          "formulary": { "tiers": 5, "drugs": [] }
+        }
+      ]
+    }
+  },
+  "carriers": {
+    "Humana": { "parent": "Humana Inc.", "naic": "73288" },
+    "Aetna": { "parent": "CVS Health", "naic": "72052" },
+    "UnitedHealthcare": { "parent": "UnitedHealth Group", "naic": "79413" },
+    "WellCare": { "parent": "Centene Corporation", "naic": "14043" },
+    "Cigna Healthcare": { "parent": "The Cigna Group", "naic": "62308" },
+    "Kaiser Permanente": { "parent": "Kaiser Foundation Health Plan", "naic": "96385" }
+  }
+}
