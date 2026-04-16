@@ -10,11 +10,13 @@
  *      and replay the buffer — so a flap doesn't lose audio context
  *
  * EventTarget surface:
- *   "stateChange"   { detail: "disconnected"|"connecting"|"connected"|"reconnecting" }
- *   "hello"         { detail: { type, sessionId, serverTime } }
- *   "ready"         { detail: { type, sessionId } }
- *   "utterance"     { detail: { type, final, speaker, text, ts, redactionCounts } }
- *   "streamError"   { detail: { type:"error", code, message } }
+ *   "stateChange"     { detail: "disconnected"|"connecting"|"connected"|"reconnecting" }
+ *   "hello"           { detail: { type, sessionId, serverTime } }
+ *   "ready"           { detail: { type, sessionId } }
+ *   "utterance"       { detail: { type, final, speaker, text, ts, redactionCounts } }
+ *   "suggestion"      { detail: { phase: "start"|"delta"|"done"|"error", id, kind, ... } }
+ *   "peclUpdate"      { detail: { items: PeclItemId[] } }
+ *   "streamError"     { detail: { type:"error", code, message } }
  *
  * The class is designed to be testable: the WebSocket constructor is
  * injectable via the `WebSocketImpl` option so tests can simulate
@@ -69,6 +71,8 @@ export class StreamSocket extends EventTarget {
     /** @type {Array<ArrayBuffer>} ring buffer of outgoing frames */
     this.frameBuffer = [];
     this.lastSessionId = null;
+    /** Latest lead snapshot — re-sent to the server on reconnect. */
+    this.lastLead = null;
     /** Total frames dropped because the buffer was full (telemetry). */
     this.droppedFrames = 0;
   }
@@ -128,6 +132,19 @@ export class StreamSocket extends EventTarget {
   }
 
   /**
+   * Send the current lead snapshot to the server. The server uses it
+   * as Claude prompt context. Caller is responsible for shape; we just
+   * pass it through. Send `null` to clear.
+   * @param {object|null} lead
+   */
+  setLeadContext(lead) {
+    this.lastLead = lead ?? null;
+    if (this.state === "connected") {
+      this._safeSend(JSON.stringify({ type: "lead_context", lead: this.lastLead }));
+    }
+  }
+
+  /**
    * Enqueue a PCM frame. Validates length, buffers if the socket isn't
    * ready yet, otherwise writes immediately.
    * @param {ArrayBuffer|ArrayBufferView} frame
@@ -178,6 +195,10 @@ export class StreamSocket extends EventTarget {
       if (this.audioActive) {
         this._safeSend(JSON.stringify({ type: "start" }));
       }
+      // Re-send the lead snapshot so a flap doesn't lose Claude context.
+      if (this.lastLead) {
+        this._safeSend(JSON.stringify({ type: "lead_context", lead: this.lastLead }));
+      }
     };
     ws.onmessage = (ev) => this._onMessage(ev);
     ws.onclose = () => this._handleSocketDeath();
@@ -208,6 +229,29 @@ export class StreamSocket extends EventTarget {
         return;
       case "utterance":
         this.dispatchEvent(new CustomEvent("utterance", { detail: msg }));
+        return;
+      case "suggestion_start":
+        this.dispatchEvent(
+          new CustomEvent("suggestion", { detail: { ...msg, phase: "start" } })
+        );
+        return;
+      case "suggestion_delta":
+        this.dispatchEvent(
+          new CustomEvent("suggestion", { detail: { ...msg, phase: "delta" } })
+        );
+        return;
+      case "suggestion_done":
+        this.dispatchEvent(
+          new CustomEvent("suggestion", { detail: { ...msg, phase: "done" } })
+        );
+        return;
+      case "suggestion_error":
+        this.dispatchEvent(
+          new CustomEvent("suggestion", { detail: { ...msg, phase: "error" } })
+        );
+        return;
+      case "pecl_update":
+        this.dispatchEvent(new CustomEvent("peclUpdate", { detail: msg }));
         return;
       case "pong":
         return; // ignore

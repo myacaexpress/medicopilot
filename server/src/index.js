@@ -15,10 +15,15 @@ import streamRoutes from "./routes/stream.js";
 
 /**
  * @param {Partial<import("./env.js").Env>} [envOverrides]
- * @param {{ deepgramFactory?: import("./deepgram.js").createDeepgramSession }} [opts]
- *   `deepgramFactory` is injected by tests to stub out the upstream
- *   Deepgram WebSocket. In production, the route falls back to the
- *   real implementation.
+ * @param {{
+ *   deepgramFactory?: import("./deepgram.js").createDeepgramSession,
+ *   suggestionClientFactory?: () => object,
+ *   suggestionEngineFactory?: (deps: object) => object,
+ * }} [opts]
+ *   `deepgramFactory`, `suggestionClientFactory`, and
+ *   `suggestionEngineFactory` are injected by tests to stub the
+ *   Deepgram WebSocket and Claude stream. In production, routes fall
+ *   back to real implementations.
  */
 export async function build(envOverrides = {}, opts = {}) {
   const env = { ...loadEnv(), ...envOverrides };
@@ -35,6 +40,12 @@ export async function build(envOverrides = {}, opts = {}) {
 
   if (opts.deepgramFactory) {
     app.decorate("deepgramFactory", opts.deepgramFactory);
+  }
+  if (opts.suggestionClientFactory) {
+    app.decorate("suggestionClientFactory", opts.suggestionClientFactory);
+  }
+  if (opts.suggestionEngineFactory) {
+    app.decorate("suggestionEngineFactory", opts.suggestionEngineFactory);
   }
 
   await app.register(websocket, {

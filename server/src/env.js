@@ -19,6 +19,10 @@ const required = [];
  *   corsOrigin: string,
  *   deepgramApiKey: string|null,
  *   deepgramSampleRate: number,
+ *   anthropicApiKey: string|null,
+ *   suggestionModel: string,
+ *   suggestionDebounceMs: number,
+ *   suggestionWindowMs: number,
  * }} Env */
 
 /** @returns {Env} */
@@ -35,6 +39,10 @@ export function loadEnv() {
     corsOrigin: process.env.CORS_ORIGIN || "*",
     deepgramApiKey: process.env.DEEPGRAM_API_KEY || null,
     deepgramSampleRate: Number(process.env.DEEPGRAM_SAMPLE_RATE) || 16000,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || null,
+    suggestionModel: process.env.SUGGESTION_MODEL || "claude-sonnet-4-6",
+    suggestionDebounceMs: Number(process.env.SUGGESTION_DEBOUNCE_MS) || 8_000,
+    suggestionWindowMs: Number(process.env.SUGGESTION_WINDOW_MS) || 120_000,
   };
 
   const missing = required.filter((k) => !process.env[k]);

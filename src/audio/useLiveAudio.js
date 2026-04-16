@@ -61,6 +61,10 @@ export function useLiveAudio({ url, enabled }) {
     noKeyError,
     analyser: mic.analyser,
     transcripts: socket.transcripts,
+    suggestions: socket.suggestions,
+    autoPecl: socket.autoPecl,
+    setLeadContext: socket.setLeadContext,
     clearTranscripts: socket.clearTranscripts,
+    clearSuggestions: socket.clearSuggestions,
   };
 }

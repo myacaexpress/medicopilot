@@ -21,11 +21,28 @@ import { StreamSocket } from "./streamSocket.js";
  * @param {string|null|undefined} opts.url
  * @param {boolean} [opts.enabled]
  */
+/**
+ * @typedef {Object} LiveSuggestion
+ * @property {string} id
+ * @property {string} kind
+ * @property {"streaming"|"done"|"error"} status
+ * @property {string} buffer                       accumulated JSON deltas
+ * @property {object|null} suggestion              parsed AIResponse on done
+ * @property {string|null} errorMessage
+ * @property {number} updatedAt
+ */
+
+const MAX_LIVE_SUGGESTIONS = 20;
+
 export function useStreamSocket({ url, enabled = true }) {
   const [state, setState] = useState("disconnected");
   const [serverReady, setServerReady] = useState(false);
   const [transcripts, setTranscripts] = useState([]);
   const [lastError, setLastError] = useState(null);
+  /** @type {[LiveSuggestion[], Function]} */
+  const [suggestions, setSuggestions] = useState([]);
+  /** @type {[Set<string>, Function]} */
+  const [autoPecl, setAutoPecl] = useState(() => new Set());
   const socketRef = useRef(null);
 
   useEffect(() => {
@@ -34,9 +51,6 @@ export function useStreamSocket({ url, enabled = true }) {
     try {
       socket = new StreamSocket({ url });
     } catch (err) {
-      // Synchronous failure — schedule the state update via the same
-      // listener channel so it doesn't violate the
-      // react-hooks/set-state-in-effect rule.
       const errPayload = { code: "init_failed", message: err.message };
       queueMicrotask(() => setLastError(errPayload));
       return undefined;
@@ -50,11 +64,64 @@ export function useStreamSocket({ url, enabled = true }) {
     const onError = (e) => setLastError(e.detail);
     const onHello = () => setServerReady(false);
 
+    const onSuggestion = (e) => {
+      const msg = e.detail;
+      setSuggestions((prev) => {
+        const idx = prev.findIndex((s) => s.id === msg.id);
+        const now = Date.now();
+        const next = idx >= 0 ? [...prev] : [...prev];
+        const base = idx >= 0
+          ? next[idx]
+          : {
+              id: msg.id,
+              kind: msg.kind,
+              status: "streaming",
+              buffer: "",
+              suggestion: null,
+              errorMessage: null,
+              updatedAt: now,
+            };
+        let updated = base;
+        if (msg.phase === "start") {
+          updated = { ...base, status: "streaming", updatedAt: now };
+        } else if (msg.phase === "delta") {
+          updated = { ...base, buffer: base.buffer + (msg.delta ?? ""), updatedAt: now };
+        } else if (msg.phase === "done") {
+          updated = { ...base, status: "done", suggestion: msg.suggestion, updatedAt: now };
+        } else if (msg.phase === "error") {
+          updated = {
+            ...base,
+            status: "error",
+            errorMessage: msg.message ?? "Suggestion failed",
+            updatedAt: now,
+          };
+        }
+        if (idx >= 0) next[idx] = updated;
+        else next.push(updated);
+        // Keep bounded — drop the oldest if we exceed the cap.
+        return next.length > MAX_LIVE_SUGGESTIONS
+          ? next.slice(next.length - MAX_LIVE_SUGGESTIONS)
+          : next;
+      });
+    };
+
+    const onPecl = (e) => {
+      const items = Array.isArray(e.detail?.items) ? e.detail.items : [];
+      if (!items.length) return;
+      setAutoPecl((prev) => {
+        const next = new Set(prev);
+        items.forEach((id) => next.add(id));
+        return next;
+      });
+    };
+
     socket.addEventListener("stateChange", onState);
     socket.addEventListener("ready", onReady);
     socket.addEventListener("utterance", onUtterance);
     socket.addEventListener("streamError", onError);
     socket.addEventListener("hello", onHello);
+    socket.addEventListener("suggestion", onSuggestion);
+    socket.addEventListener("peclUpdate", onPecl);
 
     socket.connect();
 
@@ -64,10 +131,10 @@ export function useStreamSocket({ url, enabled = true }) {
       socket.removeEventListener("utterance", onUtterance);
       socket.removeEventListener("streamError", onError);
       socket.removeEventListener("hello", onHello);
+      socket.removeEventListener("suggestion", onSuggestion);
+      socket.removeEventListener("peclUpdate", onPecl);
       socket.disconnect();
       socketRef.current = null;
-      // Cleanup-phase resets — necessary so toggling enabled=false (or
-      // changing url) snaps the React-visible state back to defaults.
       setState("disconnected");
       setServerReady(false);
     };
@@ -80,16 +147,25 @@ export function useStreamSocket({ url, enabled = true }) {
     (buf) => socketRef.current?.sendFrame(buf),
     []
   );
+  const setLeadContext = useCallback(
+    (lead) => socketRef.current?.setLeadContext(lead),
+    []
+  );
   const clearTranscripts = useCallback(() => setTranscripts([]), []);
+  const clearSuggestions = useCallback(() => setSuggestions([]), []);
 
   return {
     state,
     serverReady,
     transcripts,
     lastError,
+    suggestions,
+    autoPecl,
     startAudio,
     stopAudio,
     sendFrame,
+    setLeadContext,
     clearTranscripts,
+    clearSuggestions,
   };
 }
