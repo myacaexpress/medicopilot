@@ -306,3 +306,78 @@ describe("startAudio idempotency + stopAudio", () => {
     expect(sock.bufferedFrameCount()).toBe(0);
   });
 });
+
+describe("tier 3: suggestions + PECL + lead context", () => {
+  it("emits a suggestion event with phase=start|delta|done as frames arrive", () => {
+    const { sock } = makeSocket();
+    const seen = [];
+    sock.addEventListener("suggestion", (e) => seen.push(e.detail));
+    sock.connect();
+    const ws = FakeWebSocket.instances[0];
+    ws.open();
+    ws.receiveJSON({ type: "suggestion_start", id: "sug_1", kind: "medication" });
+    ws.receiveJSON({ type: "suggestion_delta", id: "sug_1", kind: "medication", delta: "{\"sayThis\":\"" });
+    ws.receiveJSON({ type: "suggestion_delta", id: "sug_1", kind: "medication", delta: "Hello\"}" });
+    ws.receiveJSON({
+      type: "suggestion_done",
+      id: "sug_1",
+      kind: "medication",
+      suggestion: { sayThis: "Hello" },
+    });
+    expect(seen.map((s) => s.phase)).toEqual(["start", "delta", "delta", "done"]);
+    expect(seen[3].suggestion).toEqual({ sayThis: "Hello" });
+  });
+
+  it("emits suggestion phase=error for suggestion_error frames", () => {
+    const { sock } = makeSocket();
+    const seen = [];
+    sock.addEventListener("suggestion", (e) => seen.push(e.detail));
+    sock.connect();
+    const ws = FakeWebSocket.instances[0];
+    ws.open();
+    ws.receiveJSON({
+      type: "suggestion_error",
+      id: "sug_X",
+      kind: "question",
+      code: "stream_failed",
+      message: "boom",
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].phase).toBe("error");
+    expect(seen[0].message).toBe("boom");
+  });
+
+  it("emits peclUpdate with the items array on pecl_update frames", () => {
+    const { sock } = makeSocket();
+    const seen = [];
+    sock.addEventListener("peclUpdate", (e) => seen.push(e.detail));
+    sock.connect();
+    const ws = FakeWebSocket.instances[0];
+    ws.open();
+    ws.receiveJSON({ type: "pecl_update", items: ["msp", "medigap"] });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].items).toEqual(["msp", "medigap"]);
+  });
+
+  it("setLeadContext sends a lead_context frame and re-sends on reconnect", () => {
+    const { sock, scheduler } = makeSocket();
+    sock.connect();
+    let ws = FakeWebSocket.instances[0];
+    ws.open();
+    sock.setLeadContext({ firstName: "Maria", state: "FL" });
+    expect(
+      ws.jsonSends().find((m) => m.type === "lead_context")
+    ).toEqual({ type: "lead_context", lead: { firstName: "Maria", state: "FL" } });
+
+    // Drop connection — reconnect should re-send the lead snapshot.
+    ws.serverClose();
+    scheduler.advance(1000);
+    const ws2 = FakeWebSocket.instances[1];
+    ws2.open();
+    expect(
+      ws2.jsonSends().some(
+        (m) => m.type === "lead_context" && m.lead?.firstName === "Maria"
+      )
+    ).toBe(true);
+  });
+});

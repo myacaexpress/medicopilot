@@ -194,6 +194,69 @@ function mapLiveTranscripts(transcripts) {
   });
 }
 
+// Convert finished live suggestions into the shape AIResponseCard
+// (mobile) and renderDesktopCopilot expect. Streaming suggestions are
+// elided — we only swap in the live card once the structured tool
+// input has fully arrived.
+function liveSuggestionsToCards(suggestions) {
+  return suggestions
+    .filter((s) => s.status === "done" && s.suggestion)
+    .map((s) => {
+      const ai = s.suggestion;
+      return {
+        trigger: `Live · ${s.kind}`,
+        context: { screen: "Live", audio: `Live trigger: ${s.kind}` },
+        // Mobile card uses `response`; desktop renderer reads `sayThis`.
+        response: ai.sayThis,
+        sayThis: ai.sayThis,
+        pressMore: ai.pressMore || [],
+        followUps: ai.followUps || [],
+        compliance: ai.compliance,
+        sources: ai.sources,
+      };
+    });
+}
+
+// Merge the demo PECL items with the auto-marked id Set from the
+// engine. An auto-marked item flips to done with a `coveredBy:
+// "auto-transcript"` tag so the UI can render an `AUTO` badge instead
+// of `DONE`. Items already done in the demo seed stay as-is.
+function mergePeclItems(baseItems, autoSet) {
+  if (!autoSet || autoSet.size === 0) return baseItems;
+  return baseItems.map((it) =>
+    !it.done && autoSet.has(it.id)
+      ? { ...it, done: true, coveredBy: "auto-transcript" }
+      : it
+  );
+}
+
+// Push the lead snapshot to the server whenever the lead identity or
+// the connection comes online. The server uses it as Claude prompt
+// context; sending a sparse object is fine — the prompt handles "(no
+// lead context yet)".
+function useLeadContextPush(liveAudio, lead) {
+  const lastSentRef = useRef(null);
+  useEffect(() => {
+    if (!liveAudio || !liveAudio.serverReady) return;
+    const snapshot = lead
+      ? {
+          id: lead.id,
+          state: lead.state ?? null,
+          firstName: lead.fields?.firstName?.v ?? null,
+          lastName: lead.fields?.lastName?.v ?? null,
+          dob: lead.fields?.dob?.v ?? null,
+          medications: lead.fields?.medications?.v ?? null,
+          providers: lead.fields?.providers?.v ?? null,
+          coverage: lead.fields?.coverage?.v ?? null,
+        }
+      : null;
+    const serialized = JSON.stringify(snapshot);
+    if (lastSentRef.current === serialized) return;
+    lastSentRef.current = serialized;
+    liveAudio.setLeadContext?.(snapshot);
+  }, [liveAudio, lead]);
+}
+
 // Surface stream/mic errors via the toast system. Tracks the last shown
 // error code so a single transient blip doesn't fire the same toast twice.
 function useAudioErrorToasts({ noKeyError, micError, streamError }) {
@@ -1169,7 +1232,7 @@ function ComplianceHub({ peclItems, compact = false }) {
                   padding: "1px 4px", borderRadius: 3,
                   background: item.done ? "rgba(52,199,123,0.12)" : (r === "req" ? "rgba(231,76,60,0.15)" : "rgba(245,166,35,0.12)"),
                   color: item.done ? "#34C77B" : (r === "req" ? "#ff8a7b" : "#F5A623"),
-                }}>{item.done ? "done" : riskLabel[r] || "rec"}</span>
+                }}>{item.done ? (item.coveredBy === "auto-transcript" ? "auto" : "done") : riskLabel[r] || "rec"}</span>
               </div>
             );
           })}
@@ -1392,19 +1455,25 @@ function MobileLayout() {
   // no-op and `transcripts` stays empty — renderers fall back to the demo.
   const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn });
   useAudioErrorToasts(liveAudio);
+  const { lead: ctxLead } = useLead();
+  useLeadContextPush(liveAudio, ctxLead);
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
   const renderedTranscript = usingLive
     ? liveLines
     : transcriptLines.slice(0, visibleTranscript);
+  const liveCards = liveSuggestionsToCards(liveAudio.suggestions);
 
   useEffect(() => {
     const iv = setInterval(() => setTick(t => t + 1), 300);
     return () => clearInterval(iv);
   }, []);
 
-  const peclItems = DEFAULT_PECL_ITEMS;
+  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl);
   const peclDone = peclItems.filter(i => i.done).length;
+  const displayResponses = liveCards.length > 0
+    ? liveCards
+    : aiResponses.slice(0, shownResponses);
 
   const handleAskAI = () => {
     if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
@@ -1464,10 +1533,10 @@ function MobileLayout() {
   const renderCopilot = () => (
     <div style={{ padding: 16 }}>
       <LeadContextPanel />
-      {aiResponses.slice(0, shownResponses).map((resp, i) => (
+      {displayResponses.map((resp, i) => (
         <AIResponseCard key={i} resp={resp} scaledFont={scaledFont} opacity={opacity} audioOn={audioOn} screenOn={screenOn} />
       ))}
-      {shownResponses < aiResponses.length && (
+      {liveCards.length === 0 && shownResponses < aiResponses.length && (
         <div style={{ textAlign: "center", padding: "12px 0" }}>
           <span style={{ fontFamily: T.display, fontSize: 11, color: "rgba(255,255,255,0.2)" }}>
             Tap "Ask AI" for next response...
@@ -1726,6 +1795,8 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   // Live audio pipeline (see MobileLayout for the matching wiring).
   const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn });
   useAudioErrorToasts(liveAudio);
+  const { lead: ctxLead } = useLead();
+  useLeadContextPush(liveAudio, ctxLead);
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
   const renderedTranscript = usingLive
@@ -1734,6 +1805,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const latestTranscriptText = usingLive
     ? liveLines[liveLines.length - 1].text
     : transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text;
+  const liveCards = liveSuggestionsToCards(liveAudio.suggestions);
   const collapsed = useDraggable(620, 55);
   const expanded = useDraggable(560, 30);
   const hidden = useDraggable(820, 55);
@@ -1768,7 +1840,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
   }, []);
 
-  const peclItems = DEFAULT_PECL_ITEMS;
+  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl);
   const peclDone = peclItems.filter(i => i.done).length;
   const clearBg = (a) => `rgba(0, 40, 42, ${a})`;
   const clearBorder = (a) => `1px solid rgba(0, 123, 127, ${a})`;
@@ -1845,7 +1917,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   );
 
   const renderDesktopCopilot = () => {
-    const resp = aiResponses[shownResponses - 1];
+    const resp = liveCards.length > 0
+      ? liveCards[liveCards.length - 1]
+      : aiResponses[shownResponses - 1];
     // Each pill carries a `field` identifier that maps back to a LeadContext
     // field name. Hovering the pill highlights the matching cell in
     // LeadContextPanel (spec §A3). When no underlying lead field applies
@@ -1984,7 +2058,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
   // ─── COLLAPSED ───
   if (mode === "collapsed") {
-    const latestResp = aiResponses[shownResponses - 1];
+    const latestResp = liveCards.length > 0
+      ? liveCards[liveCards.length - 1]
+      : aiResponses[shownResponses - 1];
     return (
       <div onMouseDown={collapsed.onMouseDown} style={{
         position: "absolute", left: collapsed.pos.x, top: collapsed.pos.y,

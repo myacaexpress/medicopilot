@@ -17,12 +17,18 @@
  *     { type: "ready", sessionId: string }                                  — Deepgram is open
  *     { type: "utterance", sessionId, final: true, speaker, text,
  *         ts, redactionCounts: { ssn, credit_card, phone } }                — redacted final utterance
+ *     { type: "suggestion_start", sessionId, id, kind }                     — Claude stream opened
+ *     { type: "suggestion_delta", sessionId, id, kind, delta }              — partial JSON token
+ *     { type: "suggestion_done",  sessionId, id, kind, suggestion }         — final AIResponse
+ *     { type: "suggestion_error", sessionId, id, kind, code, message }      — stream failed
+ *     { type: "pecl_update", sessionId, items: PeclItemId[] }               — newly auto-marked items
  *     { type: "pong", t: number }
  *     { type: "error", code: string, message: string }
  *   client→server:
  *     { type: "ping", t: number }
  *     { type: "start", sampleRate?: number }                                — open Deepgram
  *     { type: "stop" }                                                      — close Deepgram
+ *     { type: "lead_context", lead: object|null }                           — snapshot for Claude prompt
  *     { type: "bye" }                                                       — graceful socket close
  *     <binary>                                                              — Int16LE PCM frame
  */
@@ -30,6 +36,8 @@
 import { randomUUID } from "node:crypto";
 import { redact } from "../redact.js";
 import { createDeepgramSession } from "../deepgram.js";
+import { SuggestionEngine } from "../suggestions/engine.js";
+import { createAnthropicClient } from "../suggestions/claude.js";
 
 /**
  * @param {import("fastify").FastifyInstance} app
@@ -40,6 +48,19 @@ export default async function streamRoutes(app) {
   const deepgramFactory = app.deepgramFactory ?? createDeepgramSession;
   const apiKey = app.env?.deepgramApiKey ?? null;
   const sampleRate = app.env?.deepgramSampleRate ?? 16000;
+
+  // Suggestion engine deps. Tests can inject `app.suggestionClientFactory`
+  // and `app.suggestionEngineFactory` to stub Claude. In prod we lazily
+  // build a real Anthropic client per session (cheap; just an http agent).
+  const suggestionClientFactory =
+    app.suggestionClientFactory ??
+    (() => createAnthropicClient(app.env?.anthropicApiKey ?? null));
+  const suggestionEngineFactory =
+    app.suggestionEngineFactory ??
+    ((deps) => new SuggestionEngine(deps));
+  const suggestionModel = app.env?.suggestionModel ?? "claude-sonnet-4-6";
+  const suggestionWindowMs = app.env?.suggestionWindowMs ?? 120_000;
+  const suggestionDebounceMs = app.env?.suggestionDebounceMs ?? 8_000;
 
   app.get("/stream", { websocket: true }, (socket, req) => {
     const sessionId = randomUUID();
@@ -58,6 +79,26 @@ export default async function streamRoutes(app) {
     };
 
     const sendError = (code, message) => send({ type: "error", code, message });
+
+    // Build a per-session suggestion engine. If the Anthropic key is
+    // missing we leave `engine` null — utterances still flow but no
+    // suggestion frames go out. The agent UI falls back to demo cards.
+    let engine = null;
+    const sClient = suggestionClientFactory();
+    if (sClient) {
+      engine = suggestionEngineFactory({
+        client: sClient,
+        model: suggestionModel,
+        log,
+        emit: (event) => send({ ...event, sessionId }),
+        opts: {
+          windowMs: suggestionWindowMs,
+          cooldownMs: suggestionDebounceMs,
+        },
+      });
+    } else {
+      log.warn("stream: ANTHROPIC_API_KEY unset — suggestion engine disabled");
+    }
 
     socket.send(
       JSON.stringify({
@@ -101,6 +142,16 @@ export default async function streamRoutes(app) {
               ts: u.ts,
               redactionCounts: counts,
             });
+            // Feed the (already-redacted) utterance into the engine.
+            // Fire-and-forget — the engine emits its own events back
+            // through `send`, and any failure is logged inside.
+            if (engine) {
+              Promise.resolve(
+                engine.ingestUtterance({ speaker: u.speaker, text: redacted, ts: u.ts })
+              ).catch((err) =>
+                log.warn({ err: err.message }, "stream: engine ingest failed")
+              );
+            }
           },
           onError: (err) => {
             log.error({ err: err.message }, "stream: deepgram error");
@@ -173,6 +224,12 @@ export default async function streamRoutes(app) {
         case "stop":
           stopDeepgram("client-stop");
           return;
+        case "lead_context":
+          // Client snapshot of the lead — drives Claude prompt context.
+          // We trust the client to redact PII it doesn't want sent;
+          // server-side redaction happens at the Deepgram boundary.
+          if (engine) engine.setLead(msg.lead ?? null);
+          return;
         case "bye":
           log.info("stream: client sent bye");
           stopDeepgram("client-bye");
@@ -185,6 +242,7 @@ export default async function streamRoutes(app) {
 
     socket.on("close", (code, reason) => {
       stopDeepgram("socket-close");
+      if (engine) engine.dispose();
       log.info(
         { code, reason: reason?.toString(), frameCount, byteCount },
         "stream: client disconnected"
