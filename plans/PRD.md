@@ -429,11 +429,20 @@ speakerphone required), and toggles with a global hotkey.
 - Notarized DMG build pipeline (GitHub Actions), signed with Apple
   Developer ID; auto-updater via `tauri-plugin-updater`
 - Menu bar icon + "Quit / Preferences / Install Updates" menu
-- **Auto call-start detection via macOS CallKit + Continuity** — iPhone
-  ringing fires a native event that pops the overlay and starts
-  transcription without manual button press. This is the **P4 headline
-  demo feature**: replaces the explicit "Start Call" click that the web
-  build requires (P1–P3) with zero-touch handoff from the phone.
+- **Optional auto call-start detection via macOS CallKit + Continuity**
+  for iPhone-on-Mac users, with a confirmation prompt before
+  transcription begins to avoid capturing personal calls. Falls back
+  to the Start Call button for Android users, Windows users, and
+  anyone who disables auto-detect in settings. The button is the
+  primary mechanism; auto-detect is a convenience layer.
+
+  **Note on the real zero-friction path:** for call-center agents
+  (our actual ICP), the friction-free workflow is **dialer
+  integration**, not OS-level call detection — P3 ships a Twilio
+  demo DID that fires call-start webhooks into the copilot, and P5
+  adds the Five9 webhook integration. CallKit is a nice-to-have for
+  solo agents using their iPhone through Continuity; it is not the
+  primary path to "no button press."
 
 **Architectural reference:** Pluely (see Reference Implementations above)
 demonstrates this exact stack at ~10MB bundle and <100ms startup. Study
