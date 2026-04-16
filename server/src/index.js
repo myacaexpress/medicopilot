@@ -13,7 +13,14 @@ import { createLogger } from "./logger.js";
 import healthRoutes from "./routes/health.js";
 import streamRoutes from "./routes/stream.js";
 
-export async function build(envOverrides = {}) {
+/**
+ * @param {Partial<import("./env.js").Env>} [envOverrides]
+ * @param {{ deepgramFactory?: import("./deepgram.js").createDeepgramSession }} [opts]
+ *   `deepgramFactory` is injected by tests to stub out the upstream
+ *   Deepgram WebSocket. In production, the route falls back to the
+ *   real implementation.
+ */
+export async function build(envOverrides = {}, opts = {}) {
   const env = { ...loadEnv(), ...envOverrides };
   const logger = createLogger(env);
 
@@ -25,6 +32,10 @@ export async function build(envOverrides = {}) {
 
   // Expose env on the app instance for routes to read
   app.decorate("env", env);
+
+  if (opts.deepgramFactory) {
+    app.decorate("deepgramFactory", opts.deepgramFactory);
+  }
 
   await app.register(websocket, {
     options: { maxPayload: 1024 * 1024 }, // 1 MiB — audio frames stay well below this
