@@ -6,6 +6,11 @@ import {
   transcriptLines,
   aiResponses,
   DEFAULT_PECL_ITEMS,
+  mergePeclItems,
+  togglePeclOverride,
+  COMPLIANCE_SCRIPTS,
+  applyInsertedScripts,
+  mspBadgeMode,
 } from "./data/index.js";
 import { useLead, buildLeadFromExtraction, commitLeadEdit, makeField } from "./lead/LeadContext.jsx";
 import { useScreenCapture } from "./capture/useScreenCapture.js";
@@ -215,19 +220,6 @@ function liveSuggestionsToCards(suggestions) {
         sources: ai.sources,
       };
     });
-}
-
-// Merge the demo PECL items with the auto-marked id Set from the
-// engine. An auto-marked item flips to done with a `coveredBy:
-// "auto-transcript"` tag so the UI can render an `AUTO` badge instead
-// of `DONE`. Items already done in the demo seed stay as-is.
-function mergePeclItems(baseItems, autoSet) {
-  if (!autoSet || autoSet.size === 0) return baseItems;
-  return baseItems.map((it) =>
-    !it.done && autoSet.has(it.id)
-      ? { ...it, done: true, coveredBy: "auto-transcript" }
-      : it
-  );
 }
 
 // Push the lead snapshot to the server whenever the lead identity or
@@ -1115,7 +1107,7 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
   );
 }
 
-function ComplianceHub({ peclItems, compact = false }) {
+function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
   const peclDone = peclItems.filter(i => i.done).length;
   const mspRow = peclItems.find(i => i.id === "msp");
   const mspCovered = mspRow?.done;
@@ -1209,30 +1201,57 @@ function ComplianceHub({ peclItems, compact = false }) {
           {peclItems.map(item => {
             const r = item.done ? "done" : risk[item.id] || "rec";
             const isPending = !item.done && r === "req";
+            const isAuto = item.done && item.coveredBy === "auto-transcript";
+            const isOverridden = item.coveredBy === "manual-override";
+            const isManual = item.done && item.coveredBy === "manual";
+            const interactive = typeof onTogglePecl === "function" && (isAuto || isManual || isOverridden || (!item.done && !isPending && false) || (!item.done));
+            // Tag text + colors driven by the row's effective state.
+            let tagText, tagBg, tagColor;
+            if (isAuto)            { tagText = "auto";     tagBg = "rgba(0,123,127,0.18)";  tagColor = "#7fd9dc"; }
+            else if (isManual)     { tagText = "manual";   tagBg = "rgba(52,199,123,0.18)"; tagColor = "#34C77B"; }
+            else if (isOverridden) { tagText = "override"; tagBg = "rgba(245,166,35,0.18)"; tagColor = "#F5A623"; }
+            else if (item.done)    { tagText = "done";     tagBg = "rgba(52,199,123,0.12)"; tagColor = "#34C77B"; }
+            else if (r === "req")  { tagText = riskLabel[r] || "rec"; tagBg = "rgba(231,76,60,0.15)"; tagColor = "#ff8a7b"; }
+            else                   { tagText = riskLabel[r] || "rec"; tagBg = "rgba(245,166,35,0.12)"; tagColor = "#F5A623"; }
             return (
-              <div key={item.id} style={{
-                display: "flex", alignItems: "center", gap: 7,
-                padding: "4px 7px", borderRadius: 5,
-                background: item.done ? "rgba(52,199,123,0.04)" : (isPending ? "rgba(231,76,60,0.05)" : "transparent"),
-                fontFamily: T.body, fontSize: 11,
-              }}>
+              <div
+                key={item.id}
+                role={interactive ? "button" : undefined}
+                tabIndex={interactive ? 0 : undefined}
+                onClick={interactive ? () => onTogglePecl(item.id) : undefined}
+                onKeyDown={interactive ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTogglePecl(item.id); } } : undefined}
+                title={
+                  interactive
+                    ? (isAuto ? "Click to mark as not yet covered" :
+                       isManual ? "Click to undo manual mark" :
+                       isOverridden ? "Click to revert to auto-coverage" :
+                       "Click to mark covered manually")
+                    : undefined
+                }
+                style={{
+                  display: "flex", alignItems: "center", gap: 7,
+                  padding: "4px 7px", borderRadius: 5,
+                  background: isOverridden ? "rgba(245,166,35,0.07)" : (item.done ? "rgba(52,199,123,0.04)" : (isPending ? "rgba(231,76,60,0.05)" : "transparent")),
+                  fontFamily: T.body, fontSize: 11,
+                  cursor: interactive ? "pointer" : "default",
+                }}
+              >
                 <span style={{
                   width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-                  background: dotColor[r],
-                  boxShadow: r === "req" ? "0 0 6px rgba(231,76,60,0.5)" : (r === "done" ? "0 0 6px rgba(52,199,123,0.5)" : "none"),
+                  background: isOverridden ? "#F5A623" : dotColor[r],
+                  boxShadow: isOverridden ? "0 0 6px rgba(245,166,35,0.55)" : (r === "req" ? "0 0 6px rgba(231,76,60,0.5)" : (r === "done" ? "0 0 6px rgba(52,199,123,0.5)" : "none")),
                 }} />
                 <span style={{
                   flex: 1,
-                  color: item.done ? "rgba(255,255,255,0.55)" : (isPending ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.7)"),
+                  color: isOverridden ? "rgba(255,255,255,0.85)" : (item.done ? "rgba(255,255,255,0.55)" : (isPending ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.7)")),
                   textDecoration: item.done ? "line-through" : "none",
                   textDecorationColor: "rgba(52,199,123,0.4)",
                 }}>{item.label}</span>
                 <span style={{
-                  fontFamily: T.display, fontWeight: 700, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
-                  padding: "1px 4px", borderRadius: 3,
-                  background: item.done ? "rgba(52,199,123,0.12)" : (r === "req" ? "rgba(231,76,60,0.15)" : "rgba(245,166,35,0.12)"),
-                  color: item.done ? "#34C77B" : (r === "req" ? "#ff8a7b" : "#F5A623"),
-                }}>{item.done ? (item.coveredBy === "auto-transcript" ? "auto" : "done") : riskLabel[r] || "rec"}</span>
+                  fontFamily: T.display, fontWeight: 800, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
+                  padding: "1px 5px", borderRadius: 3,
+                  background: tagBg, color: tagColor,
+                }}>{tagText}</span>
               </div>
             );
           })}
@@ -1242,16 +1261,29 @@ function ComplianceHub({ peclItems, compact = false }) {
   );
 }
 
-function MspInlineBadge({ covered }) {
+function MspInlineBadge({ covered, onClick }) {
+  const interactive = typeof onClick === "function" && !covered;
+  const handleClick = (e) => {
+    if (!interactive) return;
+    e.stopPropagation();
+    onClick();
+  };
   return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 3,
-      padding: "1px 5px", borderRadius: 3, marginLeft: 4,
-      background: covered ? "#34C77B" : "#F5A623",
-      color: covered ? "#013014" : "#1a1200",
-      fontFamily: T.display, fontWeight: 800, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
-      cursor: "pointer",
-    }}>
+    <button
+      type="button"
+      data-no-drag="true"
+      onClick={handleClick}
+      title={covered ? "MSP covered" : (interactive ? "Insert MSP script into Say this" : "MSP")}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 3,
+        padding: "1px 5px", borderRadius: 3, marginLeft: 4,
+        background: covered ? "#34C77B" : "#F5A623",
+        color: covered ? "#013014" : "#1a1200",
+        fontFamily: T.display, fontWeight: 800, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
+        border: "none",
+        cursor: interactive ? "pointer" : "default",
+      }}
+    >
       <span style={{
         width: 9, height: 9, borderRadius: "50%",
         background: covered ? "#013014" : "#1a1200",
@@ -1259,7 +1291,7 @@ function MspInlineBadge({ covered }) {
         fontSize: 7, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800,
       }}>{covered ? "✓" : "!"}</span>
       {covered ? "MSP covered" : "MSP"}
-    </span>
+    </button>
   );
 }
 
@@ -1384,7 +1416,15 @@ function Five9Window() {
 //  SHARED: AI Response Card
 // ═══════════════════════════════════════
 
-function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn }) {
+function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsertScript, insertedScripts }) {
+  // Augment the visible response copy when the agent has clicked a
+  // compliance pill (tier 4). Tracks which scripts were inserted so the
+  // card can show a small "+ MSP script" attribution under the body.
+  const { sayThis: augmented, inserted } = applyInsertedScripts(
+    resp.response,
+    insertedScripts
+  );
+  const hasInsertions = inserted.length > 0;
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -1400,14 +1440,29 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn }) {
         <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>Context: {resp.context.audio}</span>
       </div>
       <div style={{ padding: "10px 12px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "12px 12px 12px 4px" }}>
-        <div style={{ fontFamily: T.body, fontSize: scaledFont(13), color: `rgba(255,255,255,${Math.min(opacity+0.1,0.95)})`, lineHeight: 1.55 }}>{resp.response}</div>
+        <div style={{ fontFamily: T.body, fontSize: scaledFont(13), color: `rgba(255,255,255,${Math.min(opacity+0.1,0.95)})`, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{augmented}</div>
+        {hasInsertions && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+            {inserted.map((ins) => (
+              <span key={ins.id} style={{
+                display: "inline-flex", alignItems: "center", gap: 3,
+                padding: "1px 5px", borderRadius: 3,
+                background: "rgba(0,123,127,0.12)", color: T.teal,
+                fontFamily: T.display, fontWeight: 700, fontSize: 8, letterSpacing: "0.06em", textTransform: "uppercase",
+              }}>+ {ins.label} script</span>
+            ))}
+          </div>
+        )}
         {resp.plans && <div style={{ marginTop: 8 }}>
           {resp.plans.map((p, j) => (
             <div key={j} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 8px", marginBottom: 3, background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.03)" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <div style={{ fontFamily: T.display, fontSize: scaledFont(11), fontWeight: 600, color: T.white }}>{p.name}</div>
-                  <MspInlineBadge covered={p.mspCovered !== false} />
+                  <MspInlineBadge
+                    covered={p.mspCovered !== false}
+                    onClick={onInsertScript ? () => onInsertScript("msp") : undefined}
+                  />
                 </div>
                 <div style={{ fontFamily: T.mono, fontSize: scaledFont(9), color: "rgba(255,255,255,0.3)" }}>{p.tier} · PA: {p.pa} · {p.stars}</div>
               </div>
@@ -1448,6 +1503,12 @@ function MobileLayout() {
   const [visibleTranscript, setVisibleTranscript] = useState(6);
   const [shownResponses, setShownResponses] = useState(1);
   const [tick, setTick] = useState(0);
+  // Tier 4: PECL items the agent has overridden by clicking a row.
+  // Map<peclId, "manual-done"|"manual-undone">. See togglePeclOverride.
+  const [peclOverrides, setPeclOverrides] = useState(() => new Map());
+  // Tier 4: PECL ids whose canonical script the agent has clicked into
+  // the active card's "Say this". Reset whenever the active card changes.
+  const [insertedScripts, setInsertedScripts] = useState(() => new Set());
   const opacity = 0.88;
   const scaledFont = (base) => base;
 
@@ -1469,11 +1530,44 @@ function MobileLayout() {
     return () => clearInterval(iv);
   }, []);
 
-  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl);
+  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
   const peclDone = peclItems.filter(i => i.done).length;
   const displayResponses = liveCards.length > 0
     ? liveCards
     : aiResponses.slice(0, shownResponses);
+
+  // The "active card" is the most recent one displayed — that's what an
+  // MSP-script click attaches to. When the active card identity changes
+  // we clear the inserted-scripts set so stale insertions don't leak.
+  const activeCardKey = displayResponses.length > 0
+    ? (displayResponses[displayResponses.length - 1].id || displayResponses[displayResponses.length - 1].trigger || displayResponses.length)
+    : null;
+  const lastCardKeyRef = useRef(activeCardKey);
+  useEffect(() => {
+    if (lastCardKeyRef.current !== activeCardKey) {
+      lastCardKeyRef.current = activeCardKey;
+      setInsertedScripts(new Set());
+    }
+  }, [activeCardKey]);
+
+  const handleInsertScript = useCallback((id) => {
+    if (!id || !COMPLIANCE_SCRIPTS[id]) return;
+    setInsertedScripts((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handlePeclToggle = useCallback((id) => {
+    const baseItem = DEFAULT_PECL_ITEMS.find((it) => it.id === id);
+    if (!baseItem) return;
+    const autoCovered = liveAudio.autoPecl?.has?.(id) === true;
+    setPeclOverrides((prev) =>
+      togglePeclOverride(prev, id, { baseDone: baseItem.done, autoCovered })
+    );
+  }, [liveAudio.autoPecl]);
 
   const handleAskAI = () => {
     if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
@@ -1525,7 +1619,7 @@ function MobileLayout() {
         ))}
       </div>
       <div style={{ marginTop: 16 }}>
-        <ComplianceHub peclItems={peclItems} />
+        <ComplianceHub peclItems={peclItems} onTogglePecl={handlePeclToggle} />
       </div>
     </div>
   );
@@ -1533,9 +1627,21 @@ function MobileLayout() {
   const renderCopilot = () => (
     <div style={{ padding: 16 }}>
       <LeadContextPanel />
-      {displayResponses.map((resp, i) => (
-        <AIResponseCard key={i} resp={resp} scaledFont={scaledFont} opacity={opacity} audioOn={audioOn} screenOn={screenOn} />
-      ))}
+      {displayResponses.map((resp, i) => {
+        const isActive = i === displayResponses.length - 1;
+        return (
+        <AIResponseCard
+          key={i}
+          resp={resp}
+          scaledFont={scaledFont}
+          opacity={opacity}
+          audioOn={audioOn}
+          screenOn={screenOn}
+          onInsertScript={isActive ? handleInsertScript : undefined}
+          insertedScripts={isActive ? insertedScripts : null}
+        />
+        );
+      })}
       {liveCards.length === 0 && shownResponses < aiResponses.length && (
         <div style={{ textAlign: "center", padding: "12px 0" }}>
           <span style={{ fontFamily: T.display, fontSize: 11, color: "rgba(255,255,255,0.2)" }}>
@@ -1791,6 +1897,20 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const [splitPct, setSplitPct] = useState(50);
   const splitContainerRef = useRef(null);
   const splitDragging = useRef(false);
+  // Tier 4 — see MobileLayout for the matching state.
+  const [peclOverrides, setPeclOverrides] = useState(() => new Map());
+  const [insertedScripts, setInsertedScripts] = useState(() => new Set());
+  // Call elapsed timer feeds the inline MSP header badge — flips amber
+  // after 10min without coverage. Defaulted to 0 (info tone) on first
+  // render; an interval below ticks the value forward.
+  const [callStartedAt] = useState(() => Date.now());
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setElapsedMs(Date.now() - callStartedAt);
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [callStartedAt]);
 
   // Live audio pipeline (see MobileLayout for the matching wiring).
   const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn });
@@ -1840,8 +1960,10 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
   }, []);
 
-  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl);
+  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
   const peclDone = peclItems.filter(i => i.done).length;
+  const mspCovered = peclItems.find(i => i.id === "msp")?.done === true;
+  const mspBadge = mspBadgeMode({ elapsedMs, mspCovered });
   const clearBg = (a) => `rgba(0, 40, 42, ${a})`;
   const clearBorder = (a) => `1px solid rgba(0, 123, 127, ${a})`;
 
@@ -1849,6 +1971,37 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
     if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
   };
+
+  // Tier 4 — active card insertion + PECL override handlers (mirror of MobileLayout).
+  const activeCardKey = liveCards.length > 0
+    ? (liveCards[liveCards.length - 1].id || liveCards[liveCards.length - 1].trigger)
+    : `demo-${shownResponses - 1}`;
+  const lastActiveCardKeyRef = useRef(activeCardKey);
+  useEffect(() => {
+    if (lastActiveCardKeyRef.current !== activeCardKey) {
+      lastActiveCardKeyRef.current = activeCardKey;
+      setInsertedScripts(new Set());
+    }
+  }, [activeCardKey]);
+
+  const handleInsertScript = useCallback((id) => {
+    if (!id || !COMPLIANCE_SCRIPTS[id]) return;
+    setInsertedScripts((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handlePeclToggle = useCallback((id) => {
+    const baseItem = DEFAULT_PECL_ITEMS.find((it) => it.id === id);
+    if (!baseItem) return;
+    const autoCovered = liveAudio.autoPecl?.has?.(id) === true;
+    setPeclOverrides((prev) =>
+      togglePeclOverride(prev, id, { baseDone: baseItem.done, autoCovered })
+    );
+  }, [liveAudio.autoPecl]);
 
   const panelDefs = [
     { key: "call", label: "Call Info", icon: Phone },
@@ -1888,7 +2041,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           </button>
         ))}
       </div>
-      <ComplianceHub peclItems={peclItems} compact />
+      <ComplianceHub peclItems={peclItems} onTogglePecl={handlePeclToggle} compact />
     </div>
   );
 
@@ -1939,7 +2092,12 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         { label: "Coverage gap: dental", field: "coverage" },
       ],
     };
-    const sources = sourcesByTrigger[resp.trigger];
+    // Live cards bring their own sources from the engine (plain strings,
+    // no field highlight). Demo cards fall back to the curated map above
+    // which carries field identifiers for the Lead-context ring (§A3).
+    const sources = resp.sources ?? sourcesByTrigger[resp.trigger];
+    const { sayThis: augmentedSayThis, inserted: insertedScriptDetails } =
+      applyInsertedScripts(resp.sayThis, insertedScripts);
     return (
       <div>
         <LeadContextPanel scaledFont={scaledFont} />
@@ -1957,8 +2115,33 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
         {/* ── Say this: ── */}
         <div style={{ marginBottom: 10, background: "rgba(0,123,127,0.09)", border: "1px solid rgba(0,123,127,0.28)", borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0", padding: "10px 12px" }}>
-          <div style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Say this:</div>
-          <div style={{ fontFamily: T.body, fontSize: scaledFont(13), lineHeight: 1.65, color: "rgba(255,255,255,0.92)" }}>{resp.sayThis}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.08em" }}>Say this:</span>
+            <div style={{ flex: 1 }} />
+            {insertedScriptDetails.map((ins) => (
+              <span key={ins.id} title={`${ins.label} script appended`} style={{
+                display: "inline-flex", alignItems: "center", gap: 3,
+                padding: "1px 5px", borderRadius: 3,
+                background: "rgba(245,166,35,0.18)", color: "#F5A623",
+                fontFamily: T.display, fontWeight: 700, fontSize: 8, letterSpacing: "0.07em", textTransform: "uppercase",
+              }}>+ {ins.label}</span>
+            ))}
+            <button
+              type="button"
+              data-no-drag="true"
+              onClick={() => handleInsertScript("msp")}
+              disabled={insertedScripts.has("msp")}
+              title={insertedScripts.has("msp") ? "MSP script already inserted" : "Insert MSP script"}
+              style={{
+                fontFamily: T.display, fontWeight: 700, fontSize: 8, letterSpacing: "0.06em", textTransform: "uppercase",
+                padding: "2px 6px", borderRadius: 4, cursor: insertedScripts.has("msp") ? "default" : "pointer",
+                background: insertedScripts.has("msp") ? "rgba(255,255,255,0.04)" : "rgba(0,123,127,0.18)",
+                color: insertedScripts.has("msp") ? "rgba(255,255,255,0.3)" : T.teal,
+                border: "1px solid rgba(0,123,127,0.25)",
+              }}
+            >+ MSP</button>
+          </div>
+          <div style={{ fontFamily: T.body, fontSize: scaledFont(13), lineHeight: 1.65, color: "rgba(255,255,255,0.92)", whiteSpace: "pre-wrap" }}>{augmentedSayThis}</div>
         </div>
 
         {/* ── If they press more: ── */}
@@ -2231,10 +2414,26 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: screenOn ? T.teal : "rgba(255,255,255,0.3)" }}>{screenOn ? "Screen On" : "Screen Off"}</span>
           </button>
           <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(245,166,35,0.08)", borderRadius: 6 }}>
-            <AlertTriangle size={10} color="#F5A623" />
-            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: "#F5A623" }}>MSP</span>
-          </div>
+          {mspBadge !== "hidden" && (
+            <div
+              title={mspBadge === "amber"
+                ? "MSP still uncovered after 10 minutes — raise it now"
+                : "MSP disclosure pending"}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "3px 8px", borderRadius: 6,
+                background: mspBadge === "amber" ? "rgba(245,166,35,0.18)" : "rgba(245,166,35,0.08)",
+                border: mspBadge === "amber" ? "1px solid rgba(245,166,35,0.45)" : "1px solid transparent",
+                animation: mspBadge === "amber" ? "mspHeaderPulse 2s infinite" : "none",
+              }}
+            >
+              <AlertTriangle size={10} color="#F5A623" />
+              <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: mspBadge === "amber" ? 800 : 600, color: "#F5A623" }}>
+                {mspBadge === "amber" ? "MSP overdue" : "MSP"}
+              </span>
+            </div>
+          )}
+          <style>{`@keyframes mspHeaderPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(245,166,35,0.45); } 50% { box-shadow: 0 0 0 4px rgba(245,166,35,0); } }`}</style>
           <span style={{ fontFamily: T.display, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>PECL</span>
           <div style={{ width: 40, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2 }}>
             <div style={{ width: `${(peclDone/5)*100}%`, height: 3, background: T.teal, borderRadius: 2 }} />
