@@ -68,6 +68,7 @@ export class StreamSocket extends EventTarget {
     this.shouldReconnect = false;
     this.audioActive = false;
     this.serverReady = false;
+    this._startSent = false;
     /** @type {Array<ArrayBuffer>} ring buffer of outgoing frames */
     this.frameBuffer = [];
     this.lastSessionId = null;
@@ -109,6 +110,7 @@ export class StreamSocket extends EventTarget {
     this.ws = null;
     this.audioActive = false;
     this.serverReady = false;
+    this._startSent = false;
     this.frameBuffer = [];
     this._setState("disconnected");
   }
@@ -116,7 +118,8 @@ export class StreamSocket extends EventTarget {
   /** Tell the server to open a Deepgram session. Idempotent. */
   startAudio() {
     this.audioActive = true;
-    if (this.state === "connected" && !this.serverReady) {
+    if (this.state === "connected" && !this.serverReady && !this._startSent) {
+      this._startSent = true;
       this._safeSend(JSON.stringify({ type: "start" }));
     }
   }
@@ -125,6 +128,7 @@ export class StreamSocket extends EventTarget {
   stopAudio() {
     this.audioActive = false;
     this.serverReady = false;
+    this._startSent = false;
     this.frameBuffer = [];
     if (this.state === "connected") {
       this._safeSend(JSON.stringify({ type: "stop" }));
@@ -209,6 +213,7 @@ export class StreamSocket extends EventTarget {
       this.attempt = 0;
       // Re-issue start on reconnect if audio is still active.
       if (this.audioActive) {
+        this._startSent = true;
         this._safeSend(JSON.stringify({ type: "start" }));
       }
       // Re-send the lead snapshot so a flap doesn't lose Claude context.
@@ -286,6 +291,7 @@ export class StreamSocket extends EventTarget {
 
   _handleSocketDeath() {
     this.serverReady = false;
+    this._startSent = false;
     this.ws = null;
     if (!this.shouldReconnect) {
       this._setState("disconnected");
