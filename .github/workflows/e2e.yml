@@ -40,6 +40,21 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           max_timeout: 300
 
+      # Hard-fail rather than silently fall back to the Playwright
+      # webServer when a preview was expected — otherwise a broken
+      # Vercel deploy would go green in CI while we were actually
+      # testing a local `npm run dev` build.
+      - name: Assert Vercel preview URL is present
+        if: env.HAS_VERCEL_TOKEN == 'true' && github.event_name == 'pull_request'
+        env:
+          PREVIEW_URL: ${{ steps.vercel-preview.outputs.url }}
+        run: |
+          if [ -z "$PREVIEW_URL" ]; then
+            echo "::error::Vercel preview URL is empty — deploy likely failed. Refusing to fall back to local webServer."
+            exit 1
+          fi
+          echo "Preview URL: $PREVIEW_URL"
+
       - name: Run Playwright tests
         env:
           PLAYWRIGHT_BASE_URL: ${{ steps.vercel-preview.outputs.url }}
