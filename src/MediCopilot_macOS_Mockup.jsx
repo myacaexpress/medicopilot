@@ -2417,13 +2417,15 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         {/* Sources row */}
         <SourcesRow sources={sources} />
 
-        {/* Response counter */}
+        {/* Response counter — only visible in demo mode */}
+        {!BACKEND_WSS_URL && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>{shownResponses} / {aiResponses.length} responses</span>
           {shownResponses < aiResponses.length && (
             <span style={{ fontFamily: T.display, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>· click Ask AI for next</span>
           )}
         </div>
+        )}
         </div>
       </div>
     );
