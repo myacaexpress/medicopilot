@@ -86,7 +86,7 @@ await page.addInitScript(() => {
     };
     ws.addEventListener("message", (ev) => {
       if (typeof ev.data === "string") {
-        window._wsLog.push({ dir: "←", data: ev.data.substring(0, 500) });
+        window._wsLog.push({ dir: "←", data: ev.data.substring(0, 4000) });
       }
     });
     ws.addEventListener("close", (ev) => {
@@ -140,8 +140,20 @@ console.log(`   → ${utteranceCount} utterances received before clicking Ask AI
 // ── Step 3: Ask AI ──────────────────────────────────────────────
 console.log("3. Clicking Ask AI...");
 await page.locator("button", { hasText: "Ask AI" }).first().click();
-console.log("   → Waiting 15s for suggestion response...");
-await page.waitForTimeout(15000);
+console.log("   → Polling for suggestion_done (up to 60s)...");
+let suggestionDone = false;
+for (let i = 0; i < 60; i++) {
+  suggestionDone = await page.evaluate(
+    () => (window._wsLog || []).some((m) => m.dir === "←" && m.data && m.data.includes('"suggestion_done"')),
+  );
+  if (suggestionDone) break;
+  const hasError = await page.evaluate(
+    () => (window._wsLog || []).some((m) => m.dir === "←" && m.data && m.data.includes('"suggestion_error"')),
+  );
+  if (hasError) break;
+  await page.waitForTimeout(1000);
+}
+console.log(`   → suggestion_done: ${suggestionDone} (after ${Math.min(60, 60)}s polling)`);
 await page.screenshot({ path: `${OUT_DIR}/03-after-ask-ai.png` });
 console.log("   → Screenshot: 03-after-ask-ai.png");
 
