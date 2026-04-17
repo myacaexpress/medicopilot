@@ -79,6 +79,38 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 These principles are working if: fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
+## Deploy rules (DO NOT SKIP)
+
+### Server-side changes require manual Fly deploy on PR branches
+
+GitHub Actions auto-deploys the Fly server ONLY on pushes to `main`.
+PR preview deploys on Vercel test the new frontend against MAIN's
+server code — NOT the PR branch's server.
+
+**If your PR includes ANY files under `server/**`:**
+
+After `git push`, you MUST run:
+
+    cd server && fly deploy --remote-only -a medicopilot-myacaexpress
+
+Then verify:
+
+    curl https://medicopilot-myacaexpress.fly.dev/health
+
+The response should show `uptime` < 60 seconds.
+
+DO NOT tell the user "pushed to PR" until Fly deploy completes. The
+PR preview will be broken in non-obvious ways if you skip this.
+
+Alternative: use `npm run push-pr` which does both automatically.
+
+### Why this matters
+
+We hit this bug multiple times in P2: Ask AI button appeared to fail
+because the PR preview had new client code but stale server code.
+Each "fix" re-shipped stale logic. Three PRs of wasted effort.
+See plans/LESSONS.md for the full story.
+
 ## Current phase
 
 **P2 Tier 1 — Server scaffold.** Fastify 5 backend in `server/` with `@fastify/websocket`, pino logger, `GET /health`, and a skeleton `WSS /stream` that round-trips `ping`→`pong`. Deployable to Fly.io iad (`server/fly.toml` + Dockerfile). Tests: 36 frontend (Vitest) + 4 server (node:test). Tier 2 will wire browser mic → AudioWorklet → WSS → Deepgram.
