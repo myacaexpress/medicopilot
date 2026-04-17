@@ -331,28 +331,6 @@ export class SuggestionEngine {
     }
   }
 
-  /**
-   * Explicit "Ask AI" trigger from the agent — bypasses the utterance
-   * classifier and debouncer so the user always gets a response.
-   */
-  async requestSuggestion() {
-    if (this.disposed) return;
-    if (this.window.length === 0) {
-      this.emit({
-        type: "suggestion_error",
-        id: nextId(),
-        kind: "manual",
-        code: "no_transcript",
-        message: "No transcript context yet — start speaking first",
-      });
-      return;
-    }
-    await this._runSuggestion({
-      kind: "manual",
-      summary: "Agent requested a suggestion via Ask AI",
-    });
-  }
-
   dispose() {
     this.disposed = true;
     this.window.length = 0;

@@ -1690,7 +1690,6 @@ function MobileLayout() {
     call.end();
     setAudioOn(false);
   }, [call]);
-  const toast = useToast();
   const handleStartCall = useCallback(() => {
     setAudioOn(true);
     call.start();
@@ -2100,7 +2099,6 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     return () => clearInterval(id);
   }, [call.state, call.startedAt, call.endedAt]);
 
-  const toast = useToast();
   const handleStartCall = useCallback(() => {
     setAudioOn(true);
     call.start();

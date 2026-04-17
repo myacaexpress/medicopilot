@@ -152,16 +152,6 @@ export class StreamSocket extends EventTarget {
   }
 
   /**
-   * Ask the server for an on-demand AI suggestion.
-   * Bypasses the utterance classifier + debouncer on the server.
-   */
-  requestSuggestion() {
-    if (this.state === "connected") {
-      this._safeSend(JSON.stringify({ type: "request_suggestion" }));
-    }
-  }
-
-  /**
    * Tell the server to flip the agent/client speaker mapping.
    */
   recalibrateSpeakers() {
