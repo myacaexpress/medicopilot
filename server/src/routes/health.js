@@ -11,6 +11,6 @@ export default async function healthRoutes(app) {
     version: app.env.version,
     env: app.env.nodeEnv,
     now: new Date().toISOString(),
-    deploy: "ci",
+    deploy: "github-actions",
   }));
 }
