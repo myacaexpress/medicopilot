@@ -61,6 +61,27 @@ export async function installWssMock(page) {
 
       send(data) {
         this.sent.push(data);
+        if (typeof data === "string") {
+          try {
+            const msg = JSON.parse(data);
+            if (msg.type === "request_suggestion") {
+              const id = "mock-sug-" + Date.now();
+              setTimeout(() => {
+                this._emitRaw({ type: "suggestion_start", sessionId: "mock-session", id, kind: "manual" });
+                this._emitRaw({
+                  type: "suggestion_done", sessionId: "mock-session", id, kind: "manual",
+                  suggestion: {
+                    sayThis: "Based on the conversation, I recommend reviewing the beneficiary's current coverage.",
+                    pressMore: ["Check Part D formulary"],
+                    followUps: ["Would you like to compare plans?"],
+                    compliance: null,
+                    sources: [{ label: "Live context" }],
+                  },
+                });
+              }, 50);
+            }
+          } catch { /* ignore non-JSON */ }
+        }
       }
 
       close() {
