@@ -1,12 +1,13 @@
 # MediCopilot — Product Requirements Document (PRD)
 
-**Status:** Draft v0.4 · **Owner:** Shawn (myacaexpress) · **Date:** 2026-04-15
+**Status:** Draft v0.6 · **Owner:** Shawn (myacaexpress) · **Date:** 2026-04-17
 **Audience:** Founder + AI coworking agents (Claude Code sessions)
 **Commercial model:** SaaS for Medicare insurance agencies (multi-tenant from day one)
 **Vertical:** Medicare-only for now; "generalize later" is explicit tech debt
 **Scope horizon:** Full vision, phased (P0 → P5)
 
 ### Change log
+- **v0.6** (2026-04-17) — P2 shipped. Added P2 status summary (shipped features, P2 polish roadmap, known limitations, locked decisions). Training mode + push-to-talk scoped as P2 polish.
 - **v0.5** (2026-04-15) — Database: Neon Postgres pulled into MVP (was P5) to back open SMS-OTP signup. Removed phone allowlist — anyone with a phone number can register. Confirmed P4-start Tauri transparency spike with pre-approved CSS-backdrop-blur fallback. Plan seed data ownership assigned to Claude (author will curate FL/TX/CA × 5 carriers from public CMS Plan Finder). Resolved OQ #16 (database).
 - **v0.4** (2026-04-15) — Architecture pass. MVP redefined as P0→P2 (dogfood-scale; no BAAs; myacaexpress-internal). Resolved auth (Twilio Verify SMS-OTP for MVP, Clerk at P5). Added Plan Data Provider abstraction (mock now; CMS Marketplace API + carrier machine-readable directories later). Locked monolith Fastify on Fly.io iad. Locked observability (Sentry + Axiom) and telemetry (PostHog self-hosted). Noted Tauri #13415 transparency-on-DMG risk with CSS-backdrop-blur fallback. Resolved OQs #3, #5, #7 and added #12–#15.
 - **v0.3** (2026-04-15) — Added Reference Implementations subsection (Pluely as P4 architectural reference, GPL v3 no-fork rule). Added VAD to P2 trigger pipeline. Revised P4 bundle target (≤15MB, hard cap 30MB) based on Pluely benchmark. Added OQ#11 on stealth-mode default.
@@ -369,6 +370,32 @@ Telephony, tenancy. Auth is **in scope** (SMS-OTP) but limited to a hard-coded
 myacaexpress phone-number allowlist — no self-serve signup until P5.
 External PHI / non-myacaexpress tenants are out of scope until BAAs are signed
 at P5.
+
+### P2 status (updated 2026-04-17)
+
+**SHIPPED (P2 complete):**
+- Full OCR + live transcript + Claude suggestions pipeline
+- Ask AI button end-to-end
+- Playwright e2e suite + CI
+- Fly.io auto-deploy via GitHub Actions
+- Speaker diarization (first-speaker-is-agent + Swap button)
+- Call-state management (idle/active/ended)
+- Capture Lead with real screen OCR
+
+**NEXT (P2 polish):**
+- Training mode (per-call toggle, orange theme)
+- Push-to-talk in training (Space bar, 100% accurate speaker tagging)
+- Voice enrollment (optional calibration on first production Start Call)
+- Prompt tuning (warmer voice, script-aware, diarization-resilient)
+
+**KNOWN LIMITATIONS → P3:**
+- Diarization on speakerphone ~70–80%. Real fix is Twilio softphone with separate audio streams.
+- No inbound/outbound call detection — needs softphone integration.
+
+**DECISIONS LOCKED:**
+- Training mode = per-call toggle, not persistent
+- Voice calibration = optional phrase on first production Start Call
+- Training with remote partner = regular phone call on speaker + push-to-talk
 
 ---
 
