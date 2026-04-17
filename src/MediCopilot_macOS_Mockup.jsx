@@ -306,6 +306,21 @@ function useAudioErrorToasts({ noKeyError, micError, streamError }) {
   }, [noKeyError, micError, streamError, toast]);
 }
 
+function useSuggestionErrorToasts(suggestions) {
+  const toast = useToast();
+  const seenRef = useRef(new Set());
+  useEffect(() => {
+    for (const s of suggestions) {
+      if (s.status !== "error" || seenRef.current.has(s.id)) continue;
+      seenRef.current.add(s.id);
+      const msg = s.errorMessage === "No transcript context yet — start speaking first"
+        ? "Say something first — Ask AI needs a few seconds of conversation to work with."
+        : (s.errorMessage || "Suggestion failed");
+      toast.show({ kind: "warn", title: "Ask AI", detail: msg });
+    }
+  }, [suggestions, toast]);
+}
+
 function RecordingPill({ audioOn }) {
   if (!audioOn) return null;
   return (
@@ -1634,6 +1649,7 @@ function MobileLayout() {
   // useLiveAudio cleanup (closes WSS intentionally + releases the mic).
   const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn && callActive });
   useAudioErrorToasts(liveAudio);
+  useSuggestionErrorToasts(liveAudio.suggestions);
   useLeadContextPush(liveAudio, ctxLead);
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
@@ -2113,6 +2129,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   // releases the mic track and intentionally closes the WSS.
   const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn && callActive });
   useAudioErrorToasts(liveAudio);
+  useSuggestionErrorToasts(liveAudio.suggestions);
   useLeadContextPush(liveAudio, ctxLead);
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
