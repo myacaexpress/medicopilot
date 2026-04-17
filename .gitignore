@@ -6,3 +6,8 @@ dist
 # Sandbox / session artifacts — not part of the repo
 .outbox/
 .vercel
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/

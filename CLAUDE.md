@@ -116,6 +116,9 @@ All secrets live in environment variables — **never in the client bundle**. Se
 │   │       ├── health.js         — GET /health
 │   │       └── stream.js         — WSS /stream (Tier 1: ping/pong skeleton)
 │   └── test/                     — node:test runner (no vitest)
+├── e2e/                          — Playwright smoke suite (see e2e/README.md)
+│   ├── fixtures/                 — mockMediaDevices / mockApi / mockWss
+│   └── *.spec.js                 — smoke, capture, call-state, msp, pecl
 └── src-tauri/                    — Tauri wrapper (P4)
 ```
 
@@ -175,6 +178,11 @@ npm run test:watch  # Vitest in watch mode
 npm run server:dev  # Fastify server on :8080 (node --watch)
 npm run server:test # node:test runner for server/ (4 tests)
 ```
+
+Additional scripts:
+- `npm run e2e` — Playwright smoke suite (see [e2e/README.md](e2e/README.md))
+- `npm run e2e:ui` — Playwright UI runner for step-through debugging
+- `npm run e2e:report` — open the last HTML report
 
 Planned scripts (per phase):
 - `npm run typecheck` (P0 — JSDoc first, full TS at P2)
