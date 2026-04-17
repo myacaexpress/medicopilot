@@ -284,10 +284,15 @@ export default async function streamRoutes(app) {
           return;
         case "set_training_mode":
           trainingMode = !!msg.enabled;
+          if (trainingMode) {
+            agentLabel = null;
+            speakerLocked = false;
+          }
           log.info({ trainingMode }, "stream: training mode toggled");
           return;
         case "ptt_state":
           pttSpeaking = !!msg.speaking;
+          log.debug({ pttSpeaking }, "stream: ptt state changed");
           return;
         case "bye":
           log.info("stream: client sent bye");
