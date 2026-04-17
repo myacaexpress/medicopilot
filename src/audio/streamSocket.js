@@ -152,6 +152,15 @@ export class StreamSocket extends EventTarget {
   }
 
   /**
+   * Tell the server to flip the agent/client speaker mapping.
+   */
+  recalibrateSpeakers() {
+    if (this.state === "connected") {
+      this._safeSend(JSON.stringify({ type: "recalibrate_speakers" }));
+    }
+  }
+
+  /**
    * Enqueue a PCM frame. Validates length, buffers if the socket isn't
    * ready yet, otherwise writes immediately.
    * @param {ArrayBuffer|ArrayBufferView} frame
@@ -259,6 +268,9 @@ export class StreamSocket extends EventTarget {
         return;
       case "pecl_update":
         this.dispatchEvent(new CustomEvent("peclUpdate", { detail: msg }));
+        return;
+      case "speakers_recalibrated":
+        this.dispatchEvent(new CustomEvent("speakersRecalibrated", { detail: msg }));
         return;
       case "pong":
         return; // ignore

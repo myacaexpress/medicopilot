@@ -200,8 +200,9 @@ function mapLiveTranscripts(transcripts) {
     const time = ts && !Number.isNaN(ts.getTime())
       ? `${String(ts.getMinutes()).padStart(2, "0")}:${String(ts.getSeconds()).padStart(2, "0")}`
       : `${String(Math.floor(i / 6)).padStart(2, "0")}:${String((i * 10) % 60).padStart(2, "0")}`;
-    const speakerNum = typeof u.speaker === "number" ? u.speaker : 0;
-    const speaker = speakerNum % 2 === 0 ? "agent" : "client";
+    const speaker = (u.speaker === "agent" || u.speaker === "client")
+      ? u.speaker
+      : (typeof u.speaker === "number" ? (u.speaker % 2 === 0 ? "agent" : "client") : "agent");
     const text = u.text || "";
     const isQuestion = /\?\s*$/.test(text);
     return { time, speaker, text, isQuestion };
@@ -1601,6 +1602,7 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsert
 // ═══════════════════════════════════════
 
 function MobileLayout() {
+  const toast = useToast();
   const [tab, setTab] = useState("copilot"); // "call" | "copilot" | "transcript"
   const [viewMode, setViewMode] = useState("tabs"); // "tabs" | "split" | "full"
   const [splitPanels, setSplitPanels] = useState(["copilot", "transcript"]);
@@ -1688,25 +1690,22 @@ function MobileLayout() {
     call.end();
     setAudioOn(false);
   }, [call]);
-  const toast = useToast();
   const handleStartCall = useCallback(() => {
     setAudioOn(true);
     call.start();
   }, [call]);
 
   const handleAskAI = () => {
-    if (liveAudio.socketState === "connected" && callActive) {
+    if (BACKEND_WSS_URL) {
+      if (!callActive) {
+        toast.show({ kind: "warn", title: "Start a call first", detail: "Ask AI needs an active call with transcript context." });
+        return;
+      }
       liveAudio.requestSuggestion();
       return;
     }
-    if (!callActive) {
-      toast.show({ kind: "info", title: "Start a call first", detail: "Ask AI needs an active call to generate suggestions." });
-      return;
-    }
-    if (shownResponses < aiResponses.length) {
-      setShownResponses(s => s + 1);
-      if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
-    }
+    if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
+    if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
   };
 
   const panelDefs = [
@@ -1820,6 +1819,7 @@ function MobileLayout() {
         {callActive && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
         {callActive && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
         {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)", marginLeft: "auto" }}>Five9 — Maria Garcia</span>}
+        {usingLive && <button onClick={() => liveAudio.recalibrateSpeakers()} style={{ marginLeft: usingLive && !screenOn ? "auto" : 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.4)" }}>↻ Swap speakers</button>}
       </div>
       {renderedTranscript.map((line, i) => (
         <div key={i} style={{ display: "flex", gap: 8, padding: "6px 0", alignItems: "flex-start", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
@@ -2055,6 +2055,7 @@ function MobileLayout() {
 // ═══════════════════════════════════════
 
 function MediCopilotOverlay({ mode, setMode, opacity }) {
+  const toast = useToast();
   const [inputVal, setInputVal] = useState("");
   const [audioOn, setAudioOn] = useState(true);
   const [screenOn, setScreenOn] = useState(true);
@@ -2098,7 +2099,6 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     return () => clearInterval(id);
   }, [call.state, call.startedAt, call.endedAt]);
 
-  const toast = useToast();
   const handleStartCall = useCallback(() => {
     setAudioOn(true);
     call.start();
@@ -2165,18 +2165,16 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const clearBorder = (a) => `1px solid rgba(0, 123, 127, ${a})`;
 
   const handleAskAI = () => {
-    if (liveAudio.socketState === "connected" && callActive) {
+    if (BACKEND_WSS_URL) {
+      if (!callActive) {
+        toast.show({ kind: "warn", title: "Start a call first", detail: "Ask AI needs an active call with transcript context." });
+        return;
+      }
       liveAudio.requestSuggestion();
       return;
     }
-    if (!callActive) {
-      toast.show({ kind: "info", title: "Start a call first", detail: "Ask AI needs an active call to generate suggestions." });
-      return;
-    }
-    if (shownResponses < aiResponses.length) {
-      setShownResponses(s => s + 1);
-      if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
-    }
+    if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
+    if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
   };
 
   // Tier 4 — active card insertion + PECL override handlers (mirror of MobileLayout).
@@ -2288,6 +2286,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         {callActive && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
         {callActive && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
         {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)", marginLeft: "auto" }}>Five9 — Maria Garcia, 33024</span>}
+        {usingLive && <button onClick={() => liveAudio.recalibrateSpeakers()} style={{ marginLeft: usingLive && !screenOn ? "auto" : 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.4)" }}>↻ Swap speakers</button>}
       </div>
       {renderedTranscript.map((line, i) => (
         <div key={i} style={{ display: "flex", gap: 8, padding: "3px 0", alignItems: "flex-start" }}>
@@ -2416,13 +2415,15 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         {/* Sources row */}
         <SourcesRow sources={sources} />
 
-        {/* Response counter */}
+        {/* Response counter — only visible in demo mode */}
+        {!BACKEND_WSS_URL && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>{shownResponses} / {aiResponses.length} responses</span>
           {shownResponses < aiResponses.length && (
             <span style={{ fontFamily: T.display, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>· click Ask AI for next</span>
           )}
         </div>
+        )}
         </div>
       </div>
     );

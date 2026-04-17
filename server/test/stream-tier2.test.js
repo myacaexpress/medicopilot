@@ -191,7 +191,7 @@ test("INVARIANT: PII is redacted before utterance is broadcast", async () => {
     const frame = await nextMessage();
     assert.equal(frame.type, "utterance");
     assert.equal(frame.final, true);
-    assert.equal(frame.speaker, 1);
+    assert.equal(frame.speaker, "agent"); // first speaker is mapped to "agent"
     assert.equal(frame.ts, 12.34);
 
     // The broadcast text MUST NOT contain any of the PII strings.
