@@ -29,6 +29,8 @@
  *     { type: "start", sampleRate?: number }                                — open Deepgram
  *     { type: "stop" }                                                      — close Deepgram
  *     { type: "lead_context", lead: object|null }                           — snapshot for Claude prompt
+ *     { type: "script_state", state: ScriptState|null }                     — PECL checklist state
+ *     { type: "call_timer", ms: number }                                    — elapsed call time
  *     { type: "request_suggestion" }                                        — explicit "Ask AI" trigger
  *     { type: "bye" }                                                       — graceful socket close
  *     <binary>                                                              — Int16LE PCM frame
@@ -226,10 +228,13 @@ export default async function streamRoutes(app) {
           stopDeepgram("client-stop");
           return;
         case "lead_context":
-          // Client snapshot of the lead — drives Claude prompt context.
-          // We trust the client to redact PII it doesn't want sent;
-          // server-side redaction happens at the Deepgram boundary.
           if (engine) engine.setLead(msg.lead ?? null);
+          return;
+        case "script_state":
+          if (engine) engine.setScriptState(msg.state ?? null);
+          return;
+        case "call_timer":
+          if (engine && typeof msg.ms === "number") engine.setCallTimer(msg.ms);
           return;
         case "request_suggestion":
           if (!engine) {

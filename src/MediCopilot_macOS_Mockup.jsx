@@ -217,12 +217,18 @@ function liveSuggestionsToCards(suggestions) {
     .filter((s) => s.status === "done" && s.suggestion)
     .map((s) => {
       const ai = s.suggestion;
+      const primary = ai.primary || ai.sayThis;
       return {
         trigger: `Live · ${s.kind}`,
         context: { screen: "Live", audio: `Live trigger: ${s.kind}` },
-        // Mobile card uses `response`; desktop renderer reads `sayThis`.
-        response: ai.sayThis,
-        sayThis: ai.sayThis,
+        response: primary,
+        sayThis: primary,
+        primary,
+        bridging_phrase: ai.bridging_phrase || null,
+        verbatim_next: ai.verbatim_next || null,
+        alternates: ai.alternates || [],
+        compliance_reminder: ai.compliance_reminder || null,
+        why: ai.why || null,
         pressMore: ai.pressMore || [],
         followUps: ai.followUps || [],
         compliance: ai.compliance,
@@ -1471,14 +1477,14 @@ function Five9Window({ callState = "idle", onStartCall, onEndCall }) {
 // ═══════════════════════════════════════
 
 function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsertScript, insertedScripts, mspCovered }) {
-  // Augment the visible response copy when the agent has clicked a
-  // compliance pill (tier 4). Tracks which scripts were inserted so the
-  // card can show a small "+ MSP script" attribution under the body.
+  const [showAlternates, setShowAlternates] = useState(false);
   const { sayThis: augmented, inserted } = applyInsertedScripts(
     resp.response,
     insertedScripts
   );
   const hasInsertions = inserted.length > 0;
+  const hasVerbatim = Boolean(resp.verbatim_next);
+  const hasAlternates = resp.alternates && resp.alternates.length > 0;
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -1490,9 +1496,22 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsert
           {screenOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(0,123,127,0.5)", background: "rgba(0,123,127,0.06)", padding: "1px 4px", borderRadius: 3 }}>🖥 screen</span>}
         </div>
       </div>
-      <div style={{ padding: "4px 8px", marginBottom: 6, background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.03)" }}>
-        <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>Context: {resp.context.audio}</span>
-      </div>
+      {resp.why && (
+        <div style={{ padding: "4px 8px", marginBottom: 6, background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.03)" }}>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>{resp.why}</span>
+        </div>
+      )}
+      {!resp.why && (
+        <div style={{ padding: "4px 8px", marginBottom: 6, background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.03)" }}>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>Context: {resp.context.audio}</span>
+        </div>
+      )}
+      {resp.compliance_reminder && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 6, padding: "8px 10px", background: "rgba(245,166,35,0.1)", border: "1px solid rgba(245,166,35,0.25)", borderRadius: 8 }}>
+          <AlertTriangle size={12} color="#F5A623" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontFamily: T.display, fontSize: scaledFont(11), fontWeight: 600, color: "#F5A623", lineHeight: 1.4 }}>{resp.compliance_reminder}</span>
+        </div>
+      )}
       <div style={{ padding: "10px 12px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "12px 12px 12px 4px" }}>
         <div style={{ fontFamily: T.body, fontSize: scaledFont(13), color: `rgba(255,255,255,${Math.min(opacity+0.1,0.95)})`, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{augmented}</div>
         {hasInsertions && (
@@ -1505,6 +1524,41 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsert
                 fontFamily: T.display, fontWeight: 700, fontSize: 8, letterSpacing: "0.06em", textTransform: "uppercase",
               }}>+ {ins.label} script</span>
             ))}
+          </div>
+        )}
+        {resp.bridging_phrase && hasVerbatim && (
+          <div style={{ marginTop: 8, padding: "8px 10px", background: "rgba(0,123,127,0.04)", borderRadius: 6 }}>
+            <div style={{ fontFamily: T.body, fontStyle: "italic", fontSize: scaledFont(12), color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>{resp.bridging_phrase}</div>
+          </div>
+        )}
+        {hasVerbatim && (
+          <div style={{ marginTop: 6, padding: "10px 12px", background: "rgba(0,123,127,0.08)", border: "1px solid rgba(0,123,127,0.2)", borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
+              <Shield size={10} color={T.teal} />
+              <span style={{ fontFamily: T.display, fontSize: 8, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.06em" }}>Read exactly as shown</span>
+            </div>
+            <div style={{ fontFamily: T.body, fontSize: scaledFont(13), color: T.white, lineHeight: 1.6, fontWeight: 500 }}>"{resp.verbatim_next}"</div>
+          </div>
+        )}
+        {hasAlternates && (
+          <div style={{ marginTop: 8 }}>
+            <button onClick={() => setShowAlternates(!showAlternates)} style={{
+              background: "none", border: "none", cursor: "pointer", padding: 0,
+              display: "flex", alignItems: "center", gap: 4,
+              fontFamily: T.display, fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.35)",
+            }}>
+              <ChevronRight size={10} color="rgba(255,255,255,0.35)" style={{ transform: showAlternates ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
+              {showAlternates ? "Hide" : "Show"} {resp.alternates.length} alternate{resp.alternates.length > 1 ? "s" : ""}
+            </button>
+            {showAlternates && (
+              <div style={{ marginTop: 4 }}>
+                {resp.alternates.map((alt, i) => (
+                  <div key={i} style={{ padding: "6px 8px", marginTop: 3, background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.04)" }}>
+                    <span style={{ fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.55)", lineHeight: 1.4 }}>{alt}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {resp.plans && <div style={{ marginTop: 8 }}>
