@@ -2079,7 +2079,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const [shownResponses, setShownResponses] = useState(1);
   const [tick, setTick] = useState(0);
   const [textScale, setTextScale] = useState(1);
-  const [viewMode, setViewMode] = useState("tabs"); // "tabs" | "split" | "full"
+  const [viewMode, setViewMode] = useState("split"); // "tabs" | "split" | "full"
   const [activeTab, setActiveTab] = useState("copilot");
   const [splitPanels, setSplitPanels] = useState(["transcript", "copilot"]);
   const [fullPanel, setFullPanel] = useState(null);
@@ -2143,7 +2143,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const collapsed = useDraggable(620, 55);
   const expanded = useDraggable(560, 30);
   const hidden = useDraggable(820, 55);
-  const { size: panelSize, onResizeStart } = useResizable(440, 600, 300, 200);
+  const { size: panelSize, onResizeStart } = useResizable(520, 680, 300, 200);
   const { size: collapsedSize, onResizeStart: onCollapsedResizeStart } = useResizable(390, 240, 300, 160);
   const scaledFont = (base) => Math.round(base * textScale);
   const cycleTextSize = () => setTextScale(s => {
