@@ -2141,9 +2141,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     : transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text;
   const liveCards = liveSuggestionsToCards(liveAudio.suggestions);
   const collapsed = useDraggable(620, 55);
-  const expanded = useDraggable(560, 30);
+  const expanded = useDraggable(640, 30);
   const hidden = useDraggable(820, 55);
-  const { size: panelSize, onResizeStart } = useResizable(520, 680, 300, 200);
+  const { size: panelSize, onResizeStart } = useResizable(640, 570, 300, 200);
   const { size: collapsedSize, onResizeStart: onCollapsedResizeStart } = useResizable(390, 240, 300, 160);
   const scaledFont = (base) => Math.round(base * textScale);
   const cycleTextSize = () => setTextScale(s => {
