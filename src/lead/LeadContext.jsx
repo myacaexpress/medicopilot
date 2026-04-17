@@ -150,6 +150,30 @@ export function commitLeadEdit(ctxLead, editKind, nextValue, updateField) {
   updateField(editKind, nextValue, "verified");
 }
 
+// ─── Call lifecycle ───
+
+/**
+ * Call state machine. Lives alongside the lead but is not persisted —
+ * a refresh starts the agent in "idle" so transcription doesn't kick
+ * off until they explicitly click Start Call. Transitions:
+ *
+ *   idle    → active   (Start Call clicked, or P4: CallKit auto-detect)
+ *   active  → ended    (End Call clicked, or remote hangup)
+ *   ended   → active   (Start Call clicked again — new call segment)
+ *
+ * @typedef {"idle"|"active"|"ended"} CallState
+ */
+
+/**
+ * @typedef {Object} CallLifecycle
+ * @property {CallState} state
+ * @property {number|null} startedAt   ms epoch of the most recent transition into "active"
+ * @property {number|null} endedAt     ms epoch of the most recent transition into "ended"
+ * @property {() => void} startCall
+ * @property {() => void} endCall
+ * @property {() => number} elapsedMs  Live elapsed ms; 0 when idle, frozen when ended
+ */
+
 // ─── Reducer ───
 
 /** @typedef {"CAPTURE"|"UPDATE_FIELD"|"CLEAR"|"SWITCH"|"HYDRATE"} ActionType */
@@ -212,6 +236,26 @@ export function LeadProvider({ children }) {
     }
   });
 
+  // Transient call lifecycle. Intentionally not persisted — a page
+  // refresh resets to "idle" so transcription doesn't auto-resume on
+  // reload. PECL timer + MSP amber escalation key off `callStartedAt`
+  // (not app-mount time) so escalations don't fire before the agent
+  // has actually picked up.
+  const [callState, setCallState] = useState(/** @type {CallState} */ ("idle"));
+  const [callStartedAt, setCallStartedAt] = useState(/** @type {number|null} */ (null));
+  const [callEndedAt, setCallEndedAt] = useState(/** @type {number|null} */ (null));
+
+  const startCall = useCallback(() => {
+    setCallStartedAt(Date.now());
+    setCallEndedAt(null);
+    setCallState("active");
+  }, []);
+
+  const endCall = useCallback(() => {
+    setCallEndedAt(Date.now());
+    setCallState("ended");
+  }, []);
+
   // Transient UI state: which field is currently highlighted by a hover
   // from an AI source pill. Not persisted. Auto-clears after 800ms per
   // spec §A3.
@@ -254,7 +298,12 @@ export function LeadProvider({ children }) {
   }, [lead]);
 
   return (
-    <LeadCtx.Provider value={{ lead, dispatch, highlightedField, highlightField }}>
+    <LeadCtx.Provider value={{
+      lead, dispatch,
+      highlightedField, highlightField,
+      callState, callStartedAt, callEndedAt,
+      startCall, endCall,
+    }}>
       {children}
     </LeadCtx.Provider>
   );
@@ -265,6 +314,13 @@ export function LeadProvider({ children }) {
  * @returns {{
  *   lead: LeadContext|null,
  *   highlightedField: string|null,
+ *   call: {
+ *     state: CallState,
+ *     startedAt: number|null,
+ *     endedAt: number|null,
+ *     start: () => void,
+ *     end: () => void,
+ *   },
  *   actions: {
  *     capture: (lead: LeadContext) => void,
  *     updateField: (fieldName: string, value: *, confidence?: Confidence) => void,
@@ -278,7 +334,10 @@ export function useLead() {
   const ctx = useContext(LeadCtx);
   if (!ctx) throw new Error("useLead must be used within <LeadProvider>");
 
-  const { lead, dispatch, highlightedField, highlightField } = ctx;
+  const {
+    lead, dispatch, highlightedField, highlightField,
+    callState, callStartedAt, callEndedAt, startCall, endCall,
+  } = ctx;
 
   const capture = useCallback((newLead) => {
     dispatch({ type: "CAPTURE", payload: newLead });
@@ -299,6 +358,13 @@ export function useLead() {
   return {
     lead,
     highlightedField,
+    call: {
+      state: callState,
+      startedAt: callStartedAt,
+      endedAt: callEndedAt,
+      start: startCall,
+      end: endCall,
+    },
     actions: { capture, updateField, clear, switchLead, highlightField },
   };
 }
