@@ -328,7 +328,7 @@ function SwitchLeadModal({ activeId, onPick, onClose }) {
   );
   return (
     <div data-no-drag="true" style={{
-      position: "absolute", inset: 0, zIndex: 200,
+      position: "fixed", inset: 0, zIndex: 200,
       background: "rgba(10,12,16,0.55)", backdropFilter: "blur(6px)",
       display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 60,
       cursor: "default",
@@ -585,7 +585,7 @@ function CaptureLeadModal({ onCommit, onClose }) {
 
   return (
     <div data-no-drag="true" style={{
-      position: "absolute", inset: 0, zIndex: 200,
+      position: "fixed", inset: 0, zIndex: 200,
       background: "rgba(10,12,16,0.6)", backdropFilter: "blur(6px)",
       display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 48,
       cursor: "default",
@@ -1634,14 +1634,25 @@ function MobileLayout() {
     call.end();
     setAudioOn(false);
   }, [call]);
+  const toast = useToast();
   const handleStartCall = useCallback(() => {
     setAudioOn(true);
     call.start();
   }, [call]);
 
   const handleAskAI = () => {
-    if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
-    if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
+    if (liveAudio.socketState === "connected" && callActive) {
+      liveAudio.requestSuggestion();
+      return;
+    }
+    if (!callActive) {
+      toast.show({ kind: "info", title: "Start a call first", detail: "Ask AI needs an active call to generate suggestions." });
+      return;
+    }
+    if (shownResponses < aiResponses.length) {
+      setShownResponses(s => s + 1);
+      if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
+    }
   };
 
   const panelDefs = [
@@ -2033,6 +2044,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     return () => clearInterval(id);
   }, [call.state, call.startedAt, call.endedAt]);
 
+  const toast = useToast();
   const handleStartCall = useCallback(() => {
     setAudioOn(true);
     call.start();
@@ -2099,8 +2111,18 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const clearBorder = (a) => `1px solid rgba(0, 123, 127, ${a})`;
 
   const handleAskAI = () => {
-    if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
-    if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
+    if (liveAudio.socketState === "connected" && callActive) {
+      liveAudio.requestSuggestion();
+      return;
+    }
+    if (!callActive) {
+      toast.show({ kind: "info", title: "Start a call first", detail: "Ask AI needs an active call to generate suggestions." });
+      return;
+    }
+    if (shownResponses < aiResponses.length) {
+      setShownResponses(s => s + 1);
+      if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
+    }
   };
 
   // Tier 4 — active card insertion + PECL override handlers (mirror of MobileLayout).

@@ -151,6 +151,10 @@ export function useStreamSocket({ url, enabled = true }) {
     (lead) => socketRef.current?.setLeadContext(lead),
     []
   );
+  const requestSuggestion = useCallback(
+    () => socketRef.current?.requestSuggestion(),
+    []
+  );
   const clearTranscripts = useCallback(() => setTranscripts([]), []);
   const clearSuggestions = useCallback(() => setSuggestions([]), []);
 
@@ -165,6 +169,7 @@ export function useStreamSocket({ url, enabled = true }) {
     stopAudio,
     sendFrame,
     setLeadContext,
+    requestSuggestion,
     clearTranscripts,
     clearSuggestions,
   };

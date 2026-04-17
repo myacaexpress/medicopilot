@@ -29,6 +29,7 @@
  *     { type: "start", sampleRate?: number }                                — open Deepgram
  *     { type: "stop" }                                                      — close Deepgram
  *     { type: "lead_context", lead: object|null }                           — snapshot for Claude prompt
+ *     { type: "request_suggestion" }                                        — explicit "Ask AI" trigger
  *     { type: "bye" }                                                       — graceful socket close
  *     <binary>                                                              — Int16LE PCM frame
  */
@@ -229,6 +230,15 @@ export default async function streamRoutes(app) {
           // We trust the client to redact PII it doesn't want sent;
           // server-side redaction happens at the Deepgram boundary.
           if (engine) engine.setLead(msg.lead ?? null);
+          return;
+        case "request_suggestion":
+          if (!engine) {
+            sendError("no_engine", "Suggestion engine unavailable — ANTHROPIC_API_KEY may be unset");
+            return;
+          }
+          Promise.resolve(engine.requestSuggestion()).catch((err) =>
+            log.warn({ err: err.message }, "stream: manual suggestion failed")
+          );
           return;
         case "bye":
           log.info("stream: client sent bye");

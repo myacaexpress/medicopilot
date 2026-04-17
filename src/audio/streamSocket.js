@@ -144,6 +144,13 @@ export class StreamSocket extends EventTarget {
     }
   }
 
+  /** Explicitly request a suggestion from the server ("Ask AI"). */
+  requestSuggestion() {
+    if (this.state === "connected") {
+      this._safeSend(JSON.stringify({ type: "request_suggestion" }));
+    }
+  }
+
   /**
    * Enqueue a PCM frame. Validates length, buffers if the socket isn't
    * ready yet, otherwise writes immediately.
