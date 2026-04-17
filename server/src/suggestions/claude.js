@@ -97,6 +97,10 @@ You will receive the current script state showing which PECL items are covered, 
   - \`why\`: 1-sentence agent-facing explanation of why this suggestion was triggered.
   - Never invent specific copays, plan IDs, or doctor network info you weren't given.
 
+## Speaker label resilience
+
+Speaker labels may be wrong — diarization on speakerphone is ~70-80% accurate. Use content to infer the real speaker: "I take [medication]" or "my doctor" = client. "I can help you with that" or "let me look that up" = agent. Trust content over labels when they conflict.
+
 You will be given the full compliance catalog below; use it to populate disclosures accurately.
 `.trim();
 
