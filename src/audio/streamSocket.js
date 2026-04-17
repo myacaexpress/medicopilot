@@ -164,6 +164,18 @@ export class StreamSocket extends EventTarget {
     }
   }
 
+  setTrainingMode(enabled) {
+    if (this.state === "connected") {
+      this._safeSend(JSON.stringify({ type: "set_training_mode", enabled: !!enabled }));
+    }
+  }
+
+  setPttState(speaking) {
+    if (this.state === "connected") {
+      this._safeSend(JSON.stringify({ type: "ptt_state", speaking: !!speaking }));
+    }
+  }
+
   /**
    * Enqueue a PCM frame. Validates length, buffers if the socket isn't
    * ready yet, otherwise writes immediately.

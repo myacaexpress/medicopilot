@@ -158,6 +158,8 @@ export function useStreamSocket({ url, enabled = true }) {
   const clearTranscripts = useCallback(() => setTranscripts([]), []);
   const clearSuggestions = useCallback(() => setSuggestions([]), []);
   const recalibrateSpeakers = useCallback(() => socketRef.current?.recalibrateSpeakers(), []);
+  const setTrainingMode = useCallback((enabled) => socketRef.current?.setTrainingMode(enabled), []);
+  const setPttState = useCallback((speaking) => socketRef.current?.setPttState(speaking), []);
 
   return {
     state,
@@ -174,5 +176,7 @@ export function useStreamSocket({ url, enabled = true }) {
     clearTranscripts,
     clearSuggestions,
     recalibrateSpeakers,
+    setTrainingMode,
+    setPttState,
   };
 }

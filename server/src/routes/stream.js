@@ -84,8 +84,13 @@ export default async function streamRoutes(app) {
     let agentLabel = null;
     /** @type {boolean} */
     let speakerLocked = false;
+    let trainingMode = false;
+    let pttSpeaking = false;
 
     const mapSpeaker = (dgSpeaker) => {
+      if (trainingMode) {
+        return pttSpeaking ? "agent" : "client";
+      }
       if (!speakerLocked) {
         agentLabel = dgSpeaker;
         speakerLocked = true;
@@ -276,6 +281,18 @@ export default async function streamRoutes(app) {
           agentLabel = agentLabel === 0 ? 1 : 0;
           log.info({ agentLabel }, "stream: speaker mapping recalibrated");
           send({ type: "speakers_recalibrated", sessionId, agentLabel });
+          return;
+        case "set_training_mode":
+          trainingMode = !!msg.enabled;
+          if (trainingMode) {
+            agentLabel = null;
+            speakerLocked = false;
+          }
+          log.info({ trainingMode }, "stream: training mode toggled");
+          return;
+        case "ptt_state":
+          pttSpeaking = !!msg.speaking;
+          log.debug({ pttSpeaking }, "stream: ptt state changed");
           return;
         case "bye":
           log.info("stream: client sent bye");

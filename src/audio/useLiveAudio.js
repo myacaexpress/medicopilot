@@ -68,5 +68,7 @@ export function useLiveAudio({ url, enabled }) {
     clearTranscripts: socket.clearTranscripts,
     clearSuggestions: socket.clearSuggestions,
     recalibrateSpeakers: socket.recalibrateSpeakers,
+    setTrainingMode: socket.setTrainingMode,
+    setPttState: socket.setPttState,
   };
 }
