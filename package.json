@@ -14,7 +14,8 @@
     "server:test": "npm --prefix server test",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
-    "e2e:report": "playwright show-report"
+    "e2e:report": "playwright show-report",
+    "push-pr": "git push && (git diff --name-only origin/main...HEAD | grep -q '^server/' && (cd server && fly deploy --remote-only -a medicopilot-myacaexpress && curl -sS https://medicopilot-myacaexpress.fly.dev/health) || echo 'No server/ changes, Fly deploy skipped')"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",
