@@ -2,35 +2,27 @@ import { test, expect } from "@playwright/test";
 import { installAllMocks } from "./fixtures/index.js";
 
 test.describe("training mode", () => {
-  test("training toggle flips theme + badge", async ({ page }) => {
+  test("training pill toggles in header", async ({ page }) => {
     await installAllMocks(page);
     await page.goto("/");
 
-    // Navigate to Call Info tab to find the training toggle.
-    await page.getByText("Call Info").first().click();
-
+    // Toggle is always visible in the overlay header — no tab navigation needed.
     const toggle = page.getByTestId("training-toggle").first();
     await expect(toggle).toBeVisible();
 
-    // Initially OFF — no TRAINING badge in the header.
-    // The badge is a span with exact text "TRAINING" (not "Training Mode").
-    await expect(page.getByText("TRAINING", { exact: true })).not.toBeVisible();
+    // Initially OFF — pill shows "Training" (lowercase).
+    await expect(toggle).toContainText("Training");
 
-    // Click toggle → ON.
+    // Click toggle → ON — pill shows "TRAINING" (uppercase).
     await toggle.click();
+    await expect(toggle).toContainText("TRAINING");
 
-    // Start a call in training mode (use Five9 Start Call button).
-    await page.getByRole("button", { name: /Start Call/i }).first().click();
-    await expect(page.getByText(/CONNECTED/i).first()).toBeVisible();
-
-    // TRAINING badge should appear in the header.
-    await expect(page.getByText("TRAINING", { exact: true }).first()).toBeVisible();
-
-    // Title should say "MediCopilot — Training".
-    await expect(page.getByText(/MediCopilot — Training/).first()).toBeVisible();
+    // Click toggle → OFF again.
+    await toggle.click();
+    await expect(toggle).toContainText("Training");
   });
 
-  test("training toggle hidden during active call", async ({ page }) => {
+  test("training pill visible during active call", async ({ page }) => {
     await installAllMocks(page);
     await page.goto("/");
 
@@ -38,18 +30,23 @@ test.describe("training mode", () => {
     await page.getByRole("button", { name: /Start Call/i }).first().click();
     await expect(page.getByText(/CONNECTED/i).first()).toBeVisible();
 
-    // Switch to Call Info — toggle should not be visible during active call.
-    await page.getByText("Call Info").first().click();
-    await expect(page.getByTestId("training-toggle")).not.toBeVisible();
+    // Toggle should still be visible and interactive in the header.
+    const toggle = page.getByTestId("training-toggle").first();
+    await expect(toggle).toBeVisible();
+
+    // Can flip training ON mid-call.
+    await toggle.click();
+    await expect(toggle).toContainText("TRAINING");
   });
 
-  test("training mode resets on call end", async ({ page }) => {
+  test("training mode persists across call end", async ({ page }) => {
     await installAllMocks(page);
     await page.goto("/");
 
-    // Navigate to Call Info and toggle training ON.
-    await page.getByText("Call Info").first().click();
-    await page.getByTestId("training-toggle").first().click();
+    // Toggle training ON.
+    const toggle = page.getByTestId("training-toggle").first();
+    await toggle.click();
+    await expect(toggle).toContainText("TRAINING");
 
     // Start and end a call.
     await page.getByRole("button", { name: /Start Call/i }).first().click();
@@ -57,8 +54,8 @@ test.describe("training mode", () => {
     await page.getByRole("button", { name: /End Call/i }).first().click();
     await expect(page.getByText(/CALL ENDED/i).first()).toBeVisible();
 
-    // Training badge should be gone — mode resets on call end.
-    await expect(page.getByText("TRAINING", { exact: true })).not.toBeVisible();
+    // Training should still be ON — persists per-session, not per-call.
+    await expect(toggle).toContainText("TRAINING");
   });
 });
 
@@ -67,16 +64,12 @@ test.describe("push-to-talk", () => {
     await installAllMocks(page);
     await page.goto("/");
 
-    // Navigate to Call Info and turn on training mode.
-    await page.getByText("Call Info").first().click();
+    // Turn on training mode via header pill.
     await page.getByTestId("training-toggle").first().click();
 
     // Start a call.
     await page.getByRole("button", { name: /Start Call/i }).first().click();
     await expect(page.getByText(/CONNECTED/i).first()).toBeVisible();
-
-    // Switch to Transcript panel to see PTT controls.
-    await page.getByText("Transcript", { exact: true }).first().click();
 
     // PTT mic button and hint should be visible.
     await expect(page.getByTestId("ptt-mic-button").first()).toBeVisible();
@@ -90,16 +83,12 @@ test.describe("push-to-talk", () => {
     await installAllMocks(page);
     await page.goto("/");
 
-    // Navigate to Call Info and turn on training mode.
-    await page.getByText("Call Info").first().click();
+    // Turn on training mode via header pill.
     await page.getByTestId("training-toggle").first().click();
 
     // Start call.
     await page.getByRole("button", { name: /Start Call/i }).first().click();
     await expect(page.getByText(/CONNECTED/i).first()).toBeVisible();
-
-    // Switch to Transcript panel.
-    await page.getByText("Transcript", { exact: true }).first().click();
 
     // Default: "Client speaking".
     await expect(page.getByTestId("ptt-indicator").first()).toContainText("Client speaking");

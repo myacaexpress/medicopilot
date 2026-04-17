@@ -77,6 +77,42 @@ function usePushToTalk({ enabled, onDown, onUp }) {
   return { held, everUsed };
 }
 
+function TrainingPill({ active, onToggle }) {
+  return (
+    <button
+      data-no-drag="true"
+      data-testid="training-toggle"
+      onClick={onToggle}
+      title="Training mode — orange theme, push-to-talk, skips compliance logging"
+      style={{
+        display: "flex", alignItems: "center", gap: 5,
+        padding: "3px 8px", borderRadius: 10, cursor: "pointer",
+        border: active ? `1px solid ${TRAINING_THEME.primary}` : "1px solid rgba(255,255,255,0.08)",
+        background: active ? "rgba(255,138,61,0.15)" : "rgba(255,255,255,0.04)",
+        boxShadow: active ? `0 0 8px rgba(255,138,61,0.3)` : "none",
+        animation: active ? "trainingPulse 2s ease-in-out infinite" : "none",
+        transition: "background 0.2s, border 0.2s, box-shadow 0.2s",
+      }}
+    >
+      <div style={{
+        width: 6, height: 6, borderRadius: 3,
+        background: active ? TRAINING_THEME.primary : "rgba(255,255,255,0.25)",
+        boxShadow: active ? `0 0 4px ${TRAINING_THEME.primary}` : "none",
+        transition: "background 0.2s",
+      }} />
+      <span style={{
+        fontFamily: T.display, fontSize: 9, fontWeight: 700,
+        color: active ? TRAINING_THEME.primary : "rgba(255,255,255,0.35)",
+        letterSpacing: "0.04em",
+        transition: "color 0.2s",
+      }}>
+        {active ? "TRAINING" : "Training"}
+      </span>
+      <style>{`@keyframes trainingPulse { 0%,100% { box-shadow: 0 0 6px rgba(255,138,61,0.3); } 50% { box-shadow: 0 0 12px rgba(255,138,61,0.5); } }`}</style>
+    </button>
+  );
+}
+
 // ─── Responsive hook ───
 function useIsMobile(breakpoint = 768) {
   const query = `(max-width: ${breakpoint - 1}px)`;
@@ -1851,27 +1887,6 @@ function MobileLayout() {
         )}
         <style>{`@keyframes fivePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,199,123,0.45); } 50% { box-shadow: 0 0 0 6px rgba(52,199,123,0); } }`}</style>
       </div>
-      {!callActive && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 0" }}>
-          <span style={{ fontFamily: T.display, fontSize: 12, fontWeight: 600, color: training.active ? TRAINING_THEME.primary : "rgba(255,255,255,0.4)" }}>Training Mode</span>
-          <button
-            data-testid="training-toggle"
-            onClick={() => training.setActive(!training.active)}
-            style={{
-              width: 40, height: 22, borderRadius: 11, border: "none", cursor: "pointer",
-              background: training.active ? TRAINING_THEME.primary : "rgba(255,255,255,0.15)",
-              position: "relative", transition: "background 0.2s",
-            }}
-          >
-            <div style={{
-              width: 18, height: 18, borderRadius: 9, background: T.white,
-              position: "absolute", top: 2,
-              left: training.active ? 20 : 2,
-              transition: "left 0.2s",
-            }} />
-          </button>
-        </div>
-      )}
       <div style={{ marginTop: 16 }}>
         <ComplianceHub peclItems={peclItems} onTogglePecl={handlePeclToggle} />
       </div>
@@ -2037,7 +2052,7 @@ function MobileLayout() {
         </button>
       )}
       <style>{`@keyframes ctxStartPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,199,123,0.45); } 50% { box-shadow: 0 0 0 5px rgba(52,199,123,0); } }`}</style>
-      {training.active && <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: T.white, background: TRAINING_THEME.primary, padding: "2px 6px", borderRadius: 4, letterSpacing: "0.06em" }}>TRAINING</span>}
+      <TrainingPill active={training.active} onToggle={() => training.setActive(!training.active)} />
       <div style={{ flex: 1 }} />
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(245,166,35,0.08)", borderRadius: 6 }}>
         <AlertTriangle size={10} color="#F5A623" />
@@ -2410,33 +2425,12 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             <span style={{ fontFamily: T.display, fontSize: 9, color: "#ff8a7b", fontWeight: 700 }}>End Call</span>
           </button>
         ) : (
-          <button onClick={handleStartCall} style={{ background: training.active ? "rgba(255,138,61,0.25)" : "rgba(52,199,123,0.25)", border: `1px solid ${training.active ? "rgba(255,138,61,0.45)" : "rgba(52,199,123,0.45)"}`, borderRadius: 8, padding: "8px 4px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, animation: "fivePulse 2s ease-in-out infinite" }}>
+          <button onClick={handleStartCall} style={{ background: "rgba(52,199,123,0.25)", border: "1px solid rgba(52,199,123,0.45)", borderRadius: 8, padding: "8px 4px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, animation: "fivePulse 2s ease-in-out infinite" }}>
             <span style={{ fontSize: 16 }}>📞</span>
-            <span style={{ fontFamily: T.display, fontSize: 9, color: training.active ? TRAINING_THEME.light : "#7be0a8", fontWeight: 700 }}>{callEnded ? "Start New" : "Start Call"}</span>
+            <span style={{ fontFamily: T.display, fontSize: 9, color: "#7be0a8", fontWeight: 700 }}>{callEnded ? "Start New" : "Start Call"}</span>
           </button>
         )}
       </div>
-      {!callActive && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", marginBottom: 8 }}>
-          <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: training.active ? TRAINING_THEME.primary : "rgba(255,255,255,0.4)" }}>Training Mode</span>
-          <button
-            data-testid="training-toggle"
-            onClick={() => training.setActive(!training.active)}
-            style={{
-              width: 36, height: 20, borderRadius: 10, border: "none", cursor: "pointer",
-              background: training.active ? TRAINING_THEME.primary : "rgba(255,255,255,0.15)",
-              position: "relative", transition: "background 0.2s",
-            }}
-          >
-            <div style={{
-              width: 16, height: 16, borderRadius: 8, background: T.white,
-              position: "absolute", top: 2,
-              left: training.active ? 18 : 2,
-              transition: "left 0.2s",
-            }} />
-          </button>
-        </div>
-      )}
       <ComplianceHub peclItems={peclItems} onTogglePecl={handlePeclToggle} compact />
     </div>
   );
@@ -2705,6 +2699,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             <span style={{ fontFamily: T.display, fontSize: 8, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>A</span>
             <span style={{ fontFamily: T.display, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>A</span>
           </button>
+          <TrainingPill active={training.active} onToggle={() => training.setActive(!training.active)} />
           <button data-no-drag="true" onClick={() => setMode("expanded")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
             <Maximize2 size={14} color="rgba(255,255,255,0.5)" />
           </button>
@@ -2799,8 +2794,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16 }}>
             <span style={{ color: T.white }}>Tri</span><span style={{ color: T.coral }}>B</span><span style={{ color: T.white }}>e</span>
           </span>
-          <span style={{ fontFamily: T.display, fontWeight: 400, fontSize: 11, color: "rgba(255,255,255,0.3)" }}>{training.active ? "MediCopilot — Training" : "MediCopilot"}</span>
-          {training.active && <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: T.white, background: TRAINING_THEME.primary, padding: "2px 6px", borderRadius: 4, letterSpacing: "0.06em" }}>TRAINING</span>}
+          <span style={{ fontFamily: T.display, fontWeight: 400, fontSize: 11, color: "rgba(255,255,255,0.3)" }}>MediCopilot</span>
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(52,199,123,0.1)", borderRadius: 6 }}>
             <Phone size={10} color="#34C77B" />
@@ -2810,6 +2804,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>A</span>
             <span style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>A</span>
           </button>
+          <TrainingPill active={training.active} onToggle={() => training.setActive(!training.active)} />
           <button data-no-drag="true" onClick={() => setMode("collapsed")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}><Minimize2 size={14} color="rgba(255,255,255,0.5)" /></button>
           <button data-no-drag="true" onClick={() => setMode("hidden")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}><EyeOff size={14} color="rgba(255,255,255,0.5)" /></button>
         </div>

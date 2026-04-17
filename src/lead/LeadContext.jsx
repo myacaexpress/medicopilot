@@ -244,7 +244,13 @@ export function LeadProvider({ children }) {
   const [callState, setCallState] = useState(/** @type {CallState} */ ("idle"));
   const [callStartedAt, setCallStartedAt] = useState(/** @type {number|null} */ (null));
   const [callEndedAt, setCallEndedAt] = useState(/** @type {number|null} */ (null));
-  const [trainingMode, setTrainingMode] = useState(false);
+  const [trainingMode, setTrainingModeRaw] = useState(() => {
+    try { return sessionStorage.getItem("medicopilot_training") === "1"; } catch { return false; }
+  });
+  const setTrainingMode = useCallback((v) => {
+    setTrainingModeRaw(v);
+    try { sessionStorage.setItem("medicopilot_training", v ? "1" : "0"); } catch {}
+  }, []);
   const [pttActive, setPttActive] = useState(false);
 
   const startCall = useCallback(() => {
@@ -256,7 +262,6 @@ export function LeadProvider({ children }) {
   const endCall = useCallback(() => {
     setCallEndedAt(Date.now());
     setCallState("ended");
-    setTrainingMode(false);
     setPttActive(false);
   }, []);
 
