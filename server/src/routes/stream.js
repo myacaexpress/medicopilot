@@ -173,7 +173,7 @@ export default async function streamRoutes(app) {
             // through `send`, and any failure is logged inside.
             if (engine) {
               Promise.resolve(
-                engine.ingestUtterance({ speaker: role, text: redacted, ts: u.ts })
+                engine.ingestUtterance({ speaker: role, text: redacted, ts: Date.now() })
               ).catch((err) =>
                 log.warn({ err: err.message }, "stream: engine ingest failed")
               );
