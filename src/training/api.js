@@ -5,20 +5,19 @@
 
 function getBaseUrl() {
   const wss = import.meta.env.VITE_BACKEND_WSS_URL;
-  if (!wss) return null;
+  if (!wss) return "";
   try {
     const url = new URL(wss);
     url.protocol = url.protocol === "wss:" ? "https:" : "http:";
     url.pathname = "";
     return url.origin;
   } catch {
-    return null;
+    return "";
   }
 }
 
 async function apiFetch(path, opts = {}) {
   const base = getBaseUrl();
-  if (!base) throw new Error("VITE_BACKEND_WSS_URL not configured");
   const res = await fetch(`${base}${path}`, {
     headers: { "Content-Type": "application/json", ...opts.headers },
     ...opts,
