@@ -29,3 +29,19 @@ fly deploy --remote-only -a medicopilot-myacaexpress
 The main-branch auto-deploy will overwrite this once the PR merges, so there's no cleanup needed.
 
 Alternative: use `npm run push-pr` which detects server/ changes and deploys automatically.
+
+---
+
+## Training data collection
+
+### Multi-tester practice needs server-side persistence, not exports
+
+**Date:** 2026-04-17 (Training Platform)
+
+Training data is most useful when multiple testers can run sessions independently, each session captures full context (transcript + AI suggestions + flags with surrounding context), and the admin can review without manual exports.
+
+Early thinking was "each tester exports a JSON file and emails it." This breaks as soon as you have 3+ testers because: (a) testers forget to export, (b) files arrive in different formats, (c) there's no central view to compare sessions.
+
+**Fix:** Auto-save everything to the server the moment it happens. No save button, no export step. Session created on Start Call, every utterance appended in real time, session ended on End Call or page unload (via sendBeacon). Admin dashboard at `/training/admin` gives a cross-tester view with one-click copy-as-markdown for prompt refinement.
+
+**Design principle:** if you want humans to give you training data, remove every step between "do the thing" and "data is saved." The more steps you add, the less data you get.

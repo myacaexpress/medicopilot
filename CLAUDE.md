@@ -113,11 +113,35 @@ See plans/LESSONS.md for the full story.
 
 ## Current phase
 
-**P2 Tier 1 — Server scaffold.** Fastify 5 backend in `server/` with `@fastify/websocket`, pino logger, `GET /health`, and a skeleton `WSS /stream` that round-trips `ping`→`pong`. Deployable to Fly.io iad (`server/fly.toml` + Dockerfile). Tests: 36 frontend (Vitest) + 4 server (node:test). Tier 2 will wire browser mic → AudioWorklet → WSS → Deepgram.
+**P2 Polish — Training Platform.** P2 core shipped (live transcript + AI suggestions). Current work: multi-tester training platform for solo practice with auto-save, scenario library, and admin dashboard.
 
 P1 OCR MVP shipped earlier: real `getDisplayMedia` + Claude Vision extraction in CaptureLeadModal, LeadProvider + localStorage, Vercel fns at `api/extract-lead` (vision) and `api/extract-lead-text` (paste), consent banner, mobile photo + paste fallbacks, inline edit, SourcesRow hover highlight, marquee guard, single-slot toast.
 
 The frozen v1 snapshot is tagged `v1-demo` and served independently from the primary deploy. Do not remove that tag.
+
+## Training platform
+
+Multi-tester solo practice mode for agents to rehearse Medicare sales calls.
+
+**Architecture:**
+- Tester identifies via localStorage (`trainingTesterName`) — no auth
+- Training sessions stored in Neon Postgres (`training_sessions` + `training_flags` tables)
+- Solo toggle replaces PTT hold-to-talk: Agent/Client buttons, click-to-switch, Space to toggle
+- Scenario library in `src/data/training/scenarios.js` — 7 FL-focused Medicare personas
+- Auto-save: every utterance, suggestion, and flag pushed to server in real time
+- Admin dashboard at `/training/admin` — cross-tester session list, detail view, copy-as-markdown
+- Server REST endpoints under `/api/training/*` (no auth — internal testing only)
+
+**Key files:**
+- `src/training/TrainingContext.jsx` — session lifecycle, auto-save hooks
+- `src/training/SoloToggle.jsx` — Agent/Client click-to-switch
+- `src/training/TrainingNotesPanel.jsx` — floating sidebar with persona, flags, timer
+- `src/training/AdminDashboard.jsx` — `/training/admin` page
+- `src/data/training/scenarios.js` — practice scenarios
+- `server/src/routes/training.js` — REST API
+- `server/src/db.js` — Postgres pool + schema migration
+
+**TODO (P5):** Gate `/api/training/*` endpoints by user role.
 
 ## Stack
 
@@ -184,6 +208,13 @@ All secrets live in environment variables — **never in the client bundle**. Se
 │   │   └── ConsentBanner.jsx     — recording consent banner UI
 │   ├── ui/                       — Cross-cutting UI primitives
 │   │   └── Toast.jsx             — ToastProvider + useToast() (P1 error surfacing)
+│   ├── training/                 — Training platform (P2 polish)
+│   │   ├── TrainingContext.jsx   — session lifecycle, auto-save, tester identity
+│   │   ├── TesterNamePrompt.jsx  — first-visit name prompt
+│   │   ├── ScenarioPicker.jsx    — scenario selection modal
+│   │   ├── SoloToggle.jsx        — Agent/Client click-to-switch
+│   │   ├── TrainingNotesPanel.jsx— floating sidebar (persona, flags, timer)
+│   │   └── AdminDashboard.jsx    — /training/admin page
 │   ├── __tests__/                — Vitest tests
 │   │   ├── leadContext.test.js   — reducer + helpers
 │   │   ├── dataShape.test.js     — mock data shape validation
@@ -196,6 +227,8 @@ All secrets live in environment variables — **never in the client bundle**. Se
 │       ├── plans/                — mock plan data (seed for Plan Provider)
 │       │   ├── index.js
 │       │   └── seed.json
+│       ├── training/
+│       │   └── scenarios.js      — 7 practice scenarios (FL Medicare personas)
 │       └── compliance/
 │           └── states.js         — two-party-consent state list
 ├── api/                          — Vercel Serverless Functions (P1+)
@@ -209,9 +242,11 @@ All secrets live in environment variables — **never in the client bundle**. Se
 │   │   ├── index.js              — Fastify bootstrap + graceful shutdown
 │   │   ├── env.js                — env loader
 │   │   ├── logger.js             — pino (pretty in dev, JSON in prod)
+│   │   ├── db.js                 — Postgres pool + training schema migration
 │   │   └── routes/
 │   │       ├── health.js         — GET /health
-│   │       └── stream.js         — WSS /stream (Tier 1: ping/pong skeleton)
+│   │       ├── stream.js         — WSS /stream
+│   │       └── training.js       — REST /api/training/* (sessions, flags, admin)
 │   └── test/                     — node:test runner (no vitest)
 ├── e2e/                          — Playwright smoke suite (see e2e/README.md)
 │   ├── fixtures/                 — mockMediaDevices / mockApi / mockWss

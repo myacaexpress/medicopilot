@@ -383,8 +383,9 @@ at P5.
 - Capture Lead with real screen OCR
 
 **NEXT (P2 polish):**
-- Training mode (per-call toggle, orange theme)
-- Push-to-talk in training (Space bar, 100% accurate speaker tagging)
+- ~~Training mode (per-call toggle, orange theme)~~ SHIPPED — solo toggle + multi-tester platform
+- ~~Push-to-talk in training~~ REPLACED by solo Agent/Client toggle (click-to-switch, Space to toggle)
+- Multi-tester training platform: tester identity, scenario library (7 FL personas), auto-save to Postgres, admin dashboard at `/training/admin`, flag moments with context, copy-as-markdown for prompt refinement
 - Voice enrollment (optional calibration on first production Start Call)
 - Prompt tuning (warmer voice, script-aware, diarization-resilient)
 

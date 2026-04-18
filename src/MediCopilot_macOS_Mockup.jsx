@@ -19,6 +19,11 @@ import { useConsentBanner } from "./capture/useConsentBanner.js";
 import { ConsentBanner } from "./capture/ConsentBanner.jsx";
 import { useToast } from "./ui/Toast.jsx";
 import { useLiveAudio } from "./audio/index.js";
+import { useTraining } from "./training/TrainingContext.jsx";
+import { TesterNamePrompt } from "./training/TesterNamePrompt.jsx";
+import { ScenarioPicker } from "./training/ScenarioPicker.jsx";
+import { SoloToggle } from "./training/SoloToggle.jsx";
+import { TrainingNotesPanel } from "./training/TrainingNotesPanel.jsx";
 
 const BACKEND_WSS_URL = import.meta.env.VITE_BACKEND_WSS_URL || null;
 
@@ -2236,8 +2241,10 @@ function MobileLayout() {
 
 function MediCopilotOverlay({ mode, setMode, opacity }) {
   const toast = useToast();
+  const trainingCtx = useTraining();
   const [inputVal, setInputVal] = useState("");
   const [audioOn, setAudioOn] = useState(true);
+  // Scenario picker and name prompt handled by the main export (MacOSDesktopMockup).
   const [screenOn, setScreenOn] = useState(true);
   const [visibleTranscript, setVisibleTranscript] = useState(6);
   const [shownResponses, setShownResponses] = useState(1);
@@ -2287,7 +2294,10 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const handleEndCall = useCallback(() => {
     call.end();
     setAudioOn(false);
-  }, [call]);
+    if (training.active && trainingCtx.activeSession) {
+      trainingCtx.endSession();
+    }
+  }, [call, training.active, trainingCtx]);
 
   // Live audio pipeline (see MobileLayout for the matching wiring).
   // call.state !== "active" forces enabled=false → useLiveAudio cleanup
@@ -2307,7 +2317,13 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     training.setPttHeld(false);
     liveAudio.setPttState(false);
   }, [training, liveAudio]);
-  const ptt = usePushToTalk({ enabled: training.active && callActive, onDown: pttDown, onUp: pttUp });
+  const ptt = usePushToTalk({ enabled: false, onDown: pttDown, onUp: pttUp });
+
+  const handleSoloRoleChange = useCallback((role) => {
+    liveAudio.setPttState(role === "agent");
+    training.setPttHeld(role === "agent");
+  }, [liveAudio, training]);
+
   useAudioErrorToasts(liveAudio);
   useSuggestionErrorToasts(liveAudio.suggestions);
   useLeadContextPush(liveAudio, ctxLead);
@@ -2320,6 +2336,29 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     ? liveLines[liveLines.length - 1].text
     : transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text;
   const liveCards = liveSuggestionsToCards(liveAudio.suggestions);
+
+  // Auto-save transcripts to training session
+  const lastTranscriptCount = useRef(0);
+  useEffect(() => {
+    if (!training.active || !trainingCtx.activeSession) return;
+    const newOnes = liveAudio.transcripts.slice(lastTranscriptCount.current);
+    for (const u of newOnes) {
+      trainingCtx.appendTranscript(u);
+    }
+    lastTranscriptCount.current = liveAudio.transcripts.length;
+  }, [liveAudio.transcripts.length, training.active, trainingCtx]);
+
+  // Auto-save suggestions to training session
+  const lastSuggestionCount = useRef(0);
+  useEffect(() => {
+    if (!training.active || !trainingCtx.activeSession) return;
+    const done = liveAudio.suggestions.filter(s => s.status === "done");
+    const newOnes = done.slice(lastSuggestionCount.current);
+    for (const s of newOnes) {
+      trainingCtx.appendSuggestion(s);
+    }
+    lastSuggestionCount.current = done.length;
+  }, [liveAudio.suggestions, training.active, trainingCtx]);
   const collapsed = useDraggable(620, 55);
   const expanded = useDraggable(640, 30);
   const hidden = useDraggable(820, 55);
@@ -2638,34 +2677,8 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const DesktopInputBar = ({ style = {} }) => (
     <div data-no-drag="true" style={{ padding: "10px 14px", borderTop: "1px solid rgba(255,255,255,0.06)", cursor: "default", flexShrink: 0, ...style }}>
       {showPtt && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <button
-            data-testid="ptt-mic-button"
-            onMouseDown={pttDown}
-            onMouseUp={pttUp}
-            onMouseLeave={pttUp}
-            style={{
-              flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-              padding: "12px 20px", borderRadius: 10, cursor: "pointer",
-              border: ptt.held ? `2px solid ${TRAINING_THEME.primary}` : "2px solid rgba(255,138,61,0.3)",
-              background: ptt.held ? `rgba(255,138,61,0.25)` : "rgba(255,138,61,0.08)",
-              boxShadow: ptt.held ? `0 0 16px rgba(255,138,61,0.4)` : "none",
-              transition: "background 0.15s, border 0.15s, box-shadow 0.15s",
-            }}
-          >
-            <Mic size={18} color={ptt.held ? TRAINING_THEME.primary : "rgba(255,138,61,0.6)"} />
-            <span style={{ fontFamily: T.display, fontSize: 12, fontWeight: 700, color: ptt.held ? TRAINING_THEME.primary : "rgba(255,138,61,0.7)" }}>
-              {ptt.held ? "Speaking as Agent" : "Hold to Speak as Agent"}
-            </span>
-          </button>
-          <span data-testid="ptt-indicator" style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 700, color: ptt.held ? TRAINING_THEME.primary : "rgba(255,255,255,0.35)", background: ptt.held ? "rgba(255,138,61,0.15)" : "rgba(255,255,255,0.05)", padding: "4px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
-            {ptt.held ? "Agent speaking" : "Client speaking"}
-          </span>
-        </div>
-      )}
-      {showPtt && !ptt.everUsed && (
-        <div data-testid="ptt-hint" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, padding: "6px 10px", background: "rgba(255,138,61,0.06)", border: "1px solid rgba(255,138,61,0.15)", borderRadius: 8 }}>
-          <span style={{ fontFamily: T.mono, fontSize: 10, color: "rgba(255,138,61,0.7)" }}>Hold SPACE or press & hold mic button to speak as agent</span>
+        <div data-testid="ptt-mic-button" style={{ marginBottom: 8 }}>
+          <SoloToggle onRoleChange={handleSoloRoleChange} />
         </div>
       )}
       <div style={{ display: "flex", gap: 6 }}>
@@ -3037,10 +3050,36 @@ export default function MacOSDesktopMockup() {
   const isMobile = useIsMobile();
   const [mode, setMode] = useState("expanded");
   const [opacity, setOpacity] = useState(0.82);
-  // Call lifecycle lives in LeadContext so the Five9 mock, the overlay,
-  // and any future P4 CallKit listener can all agree on whether a call
-  // is active.
-  const { call } = useLead();
+  const { call, training } = useLead();
+  const trainingCtx = useTraining();
+  const showTrainingPanel = training.active && call.state === "active" && trainingCtx.activeSession;
+  const [showNamePromptMain, setShowNamePromptMain] = useState(false);
+  const [showScenarioPickerMain, setShowScenarioPickerMain] = useState(false);
+
+  const mainStartCall = useCallback(() => {
+    if (training.active) {
+      if (!trainingCtx.testerName) {
+        setShowNamePromptMain(true);
+        return;
+      }
+      setShowScenarioPickerMain(true);
+      return;
+    }
+    call.start();
+  }, [call, training.active, trainingCtx.testerName]);
+
+  const mainTrainingStart = useCallback(async (scenario) => {
+    setShowScenarioPickerMain(false);
+    await trainingCtx.startSession(scenario);
+    call.start();
+  }, [call, trainingCtx]);
+
+  const mainEndCall = useCallback(() => {
+    call.end();
+    if (training.active && trainingCtx.activeSession) {
+      trainingCtx.endSession();
+    }
+  }, [call, training.active, trainingCtx]);
 
   if (isMobile) return <MobileLayout />;
 
@@ -3051,7 +3090,9 @@ export default function MacOSDesktopMockup() {
         <div style={{ position: "absolute", bottom: "20%", right: "30%", width: 300, height: 300, borderRadius: "50%", background: "rgba(244,124,110,0.06)", filter: "blur(60px)" }} />
       </div>
       <MacMenuBar />
-      <Five9Window callState={call.state} onStartCall={call.start} onEndCall={call.end} />
+      <Five9Window callState={call.state} onStartCall={mainStartCall} onEndCall={mainEndCall} />
+      {showNamePromptMain && <TesterNamePrompt onDone={() => { setShowNamePromptMain(false); setShowScenarioPickerMain(true); }} />}
+      {showScenarioPickerMain && <ScenarioPicker onSelect={mainTrainingStart} />}
       <MediCopilotOverlay mode={mode} setMode={setMode} opacity={opacity} />
       <MacDock />
       <div style={{ position: "absolute", top: 32, left: "50%", transform: "translateX(-50%)", padding: "4px 12px", background: "rgba(0,0,0,0.5)", borderRadius: 8, fontFamily: T.display, fontSize: 11, color: "rgba(255,255,255,0.5)" }}>
@@ -3074,6 +3115,7 @@ export default function MacOSDesktopMockup() {
           style={{ width: 80, accentColor: T.teal }} />
         <span style={{ fontFamily: T.mono, fontSize: 10, color: T.teal }}>{Math.round(opacity * 100)}%</span>
       </div>
+      {showTrainingPanel && <TrainingNotesPanel />}
     </div>
   );
 }

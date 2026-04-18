@@ -7,12 +7,15 @@
  */
 
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { loadEnv } from "./env.js";
 import { createLogger } from "./logger.js";
 import healthRoutes from "./routes/health.js";
 import streamRoutes from "./routes/stream.js";
+import trainingRoutes from "./routes/training.js";
 import { preflight } from "./preflight.js";
+import { initDb, closeDb } from "./db.js";
 
 /**
  * @param {Partial<import("./env.js").Env>} [envOverrides]
@@ -49,12 +52,15 @@ export async function build(envOverrides = {}, opts = {}) {
     app.decorate("suggestionEngineFactory", opts.suggestionEngineFactory);
   }
 
+  await app.register(cors, { origin: env.corsOrigin === "*" ? true : env.corsOrigin });
+
   await app.register(websocket, {
     options: { maxPayload: 1024 * 1024 }, // 1 MiB — audio frames stay well below this
   });
 
   await app.register(healthRoutes);
   await app.register(streamRoutes);
+  await app.register(trainingRoutes);
 
   // Root — quick sanity check if someone curls the service
   app.get("/", async () => ({
@@ -72,6 +78,7 @@ if (isMain) {
   const env = loadEnv();
   const app = await build();
   await preflight(env, app.log);
+  await initDb(app.log);
   try {
     await app.listen({ port: env.port, host: env.host });
     app.log.info({ port: env.port, host: env.host }, "server: listening");
@@ -86,6 +93,7 @@ if (isMain) {
       app.log.info({ sig }, "server: shutting down");
       try {
         await app.close();
+        await closeDb();
         process.exit(0);
       } catch (err) {
         app.log.error({ err }, "server: shutdown error");
