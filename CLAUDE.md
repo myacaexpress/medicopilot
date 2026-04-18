@@ -132,7 +132,7 @@ The frozen v1 snapshot is tagged `v1-demo` and served independently from the pri
 | **Database** | Neon Postgres (from MVP) | Serverless, RLS-ready, branching for preview deploys |
 | **Cache / sessions** | Upstash Redis | Transcript window, OTP rate-limits, WSS session state |
 | **STT** | Deepgram Nova-3 streaming + diarization | Best streaming accuracy in category |
-| **LLM** | Claude Sonnet 4.6 (suggestions + vision), Haiku 4.5 (classification) | Anthropic is the primary vendor |
+| **LLM** | Claude Haiku 4.5 (suggestions — low latency), Sonnet 4.6 (vision), Haiku 4.5 (classification) | Anthropic is the primary vendor |
 | **Auth (MVP)** | Twilio Verify SMS-OTP + self-issued JWT (open signup) | Phone-only, no passwords, no allowlist |
 | **Auth (P5)** | Clerk Organizations | Multi-tenant at P5 |
 | **Telephony (P3)** | Twilio + Retell AI | Demo DID |
