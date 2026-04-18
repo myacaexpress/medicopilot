@@ -18,6 +18,23 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const dataDir = resolve(__dirname, "../../data/compliance");
+
+/* ── CMS call flow + coaching rules (loaded once at boot) ─────────── */
+
+export const CALL_FLOW = JSON.parse(
+  readFileSync(resolve(dataDir, "call-flow.json"), "utf-8"),
+);
+
+export const COACHING_RULES = readFileSync(
+  resolve(dataDir, "coaching-rules.md"),
+  "utf-8",
+).trim();
 
 /* ── Compliance catalog (cached) ───────────────────────────────────── */
 
@@ -167,6 +184,10 @@ export const SUGGESTION_TOOL = {
         type: "string",
         description: "1-sentence agent-facing explanation of why this suggestion was triggered.",
       },
+      call_stage: {
+        type: "string",
+        description: "Detected current call flow stage ID (e.g. 'tpmo_disclosure', 'neads_analysis'). Set when you detect a stage transition from the transcript.",
+      },
     },
   },
 };
@@ -184,19 +205,37 @@ export const SUGGESTION_TOOL = {
  * @param {number} [args.callTimerMs]  elapsed call time in ms
  * @returns {string}
  */
-export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs }) {
+export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext, callStage }) {
   const transcriptStr = (transcriptWindow ?? [])
     .map((u) => `${u.speaker}: ${u.text}`)
     .join("\n");
   const leadStr = lead ? JSON.stringify(lead, null, 2) : "(no lead context yet)";
 
-  const parts = [
+  const parts = [];
+
+  if (trainingContext) {
+    parts.push(
+      "<training_context>",
+      `Scenario: ${trainingContext.title}`,
+      `Persona: ${trainingContext.persona_name}, age ${trainingContext.persona_age || "unknown"}, ${trainingContext.persona_state}`,
+      `Situation: ${trainingContext.situation}`,
+      trainingContext.carrier_prefs ? `Carrier preferences: ${trainingContext.carrier_prefs}` : "",
+      trainingContext.objections?.length ? `Likely objections: ${trainingContext.objections.join("; ")}` : "",
+      trainingContext.medications?.length ? `Medications: ${trainingContext.medications.join(", ")}` : "",
+      trainingContext.success_criteria?.length ? `Success criteria: ${trainingContext.success_criteria.join("; ")}` : "",
+      "NOTE: This is a training call. The 'client' is a tester reading from the scenario above. Tailor suggestions as if this were a real call with this persona.",
+      "</training_context>",
+      "",
+    );
+  }
+
+  parts.push(
     `Trigger: ${trigger.kind} — ${trigger.summary}`,
     trigger.item ? `Trigger payload: ${JSON.stringify(trigger.item)}` : "",
     "",
     "Lead context:",
     leadStr,
-  ];
+  );
 
   if (scriptState) {
     parts.push("", "Script state (PECL checklist):");
@@ -216,6 +255,10 @@ export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, 
     const mins = Math.floor(callTimerMs / 60000);
     const secs = Math.floor((callTimerMs % 60000) / 1000);
     parts.push("", `Call timer: ${mins}m ${secs}s`);
+  }
+
+  if (callStage) {
+    parts.push("", `Current call flow stage: ${callStage}`);
   }
 
   parts.push(
@@ -242,6 +285,7 @@ export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, 
  * @property {(delta: string) => void} [onJsonDelta]
  * @property {(payload: { suggestion: any, usage?: any, kind: string }) => void} [onComplete]
  * @property {(err: Error) => void} [onError]
+ * @property {Object} [trainingContext]
  */
 
 /**
@@ -257,9 +301,9 @@ export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, 
  */
 export async function streamSuggestion(
   { client, model, log },
-  { trigger, lead, transcriptWindow, scriptState, callTimerMs, onText, onJsonDelta, onComplete, onError }
+  { trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext, callStage, onText, onJsonDelta, onComplete, onError }
 ) {
-  const userPrompt = buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs });
+  const userPrompt = buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext, callStage });
 
   const requestBody = {
     model,
@@ -268,6 +312,11 @@ export async function streamSuggestion(
       {
         type: "text",
         text: `${SYSTEM_PROMPT}\n\nCompliance catalog:\n${COMPLIANCE_CATALOG}`,
+        cache_control: { type: "ephemeral" },
+      },
+      {
+        type: "text",
+        text: `CMS Telephonic Sales Call Flow (PY2026):\n${JSON.stringify(CALL_FLOW)}\n\n${COACHING_RULES}`,
         cache_control: { type: "ephemeral" },
       },
     ],

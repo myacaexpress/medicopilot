@@ -150,9 +150,19 @@ export class StreamSocket extends EventTarget {
 
   /** Explicitly request a suggestion from the server ("Ask AI"). */
   requestSuggestion() {
-    if (this.state === "connected") {
-      this._safeSend(JSON.stringify({ type: "request_suggestion" }));
+    if (this.state !== "connected") {
+      this.dispatchEvent(
+        new CustomEvent("streamError", {
+          detail: {
+            type: "error",
+            code: "not_connected",
+            message: "Not connected to server — try again in a moment",
+          },
+        })
+      );
+      return;
     }
+    this._safeSend(JSON.stringify({ type: "request_suggestion" }));
   }
 
   /**
@@ -173,6 +183,18 @@ export class StreamSocket extends EventTarget {
   setPttState(speaking) {
     if (this.state === "connected") {
       this._safeSend(JSON.stringify({ type: "ptt_state", speaking: !!speaking }));
+    }
+  }
+
+  setTrainingSession(sessionId) {
+    if (this.state === "connected") {
+      this._safeSend(JSON.stringify({ type: "set_training_session", sessionId }));
+    }
+  }
+
+  setTrainingScenario(scenarioId) {
+    if (this.state === "connected") {
+      this._safeSend(JSON.stringify({ type: "set_training_scenario", scenarioId }));
     }
   }
 

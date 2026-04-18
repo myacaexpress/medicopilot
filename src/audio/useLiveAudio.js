@@ -62,6 +62,7 @@ export function useLiveAudio({ url, enabled }) {
     analyser: mic.analyser,
     transcripts: socket.transcripts,
     suggestions: socket.suggestions,
+    isAiThinking: socket.isAiThinking,
     autoPecl: socket.autoPecl,
     setLeadContext: socket.setLeadContext,
     requestSuggestion: socket.requestSuggestion,
@@ -69,6 +70,8 @@ export function useLiveAudio({ url, enabled }) {
     clearSuggestions: socket.clearSuggestions,
     recalibrateSpeakers: socket.recalibrateSpeakers,
     setTrainingMode: socket.setTrainingMode,
+    setTrainingSession: socket.setTrainingSession,
     setPttState: socket.setPttState,
+    setTrainingScenario: socket.setTrainingScenario,
   };
 }

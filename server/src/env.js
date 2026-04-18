@@ -23,6 +23,8 @@ const required = [];
  *   suggestionModel: string,
  *   suggestionDebounceMs: number,
  *   suggestionWindowMs: number,
+ *   databaseUrl: string|null,
+ *   trainingAdminKey: string|null,
  * }} Env */
 
 /** @returns {Env} */
@@ -43,6 +45,8 @@ export function loadEnv() {
     suggestionModel: process.env.SUGGESTION_MODEL || "claude-sonnet-4-6",
     suggestionDebounceMs: Number(process.env.SUGGESTION_DEBOUNCE_MS) || 8_000,
     suggestionWindowMs: Number(process.env.SUGGESTION_WINDOW_MS) || 120_000,
+    databaseUrl: process.env.DATABASE_URL || null,
+    trainingAdminKey: process.env.TRAINING_ADMIN_KEY || null,
   };
 
   const missing = required.filter((k) => !process.env[k]);

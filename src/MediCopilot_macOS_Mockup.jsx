@@ -19,6 +19,10 @@ import { useConsentBanner } from "./capture/useConsentBanner.js";
 import { ConsentBanner } from "./capture/ConsentBanner.jsx";
 import { useToast } from "./ui/Toast.jsx";
 import { useLiveAudio } from "./audio/index.js";
+import { useTraining } from "./training/TrainingContext.jsx";
+import { TesterNameGate } from "./training/TesterNameGate.jsx";
+import { ScenarioPicker } from "./training/ScenarioPicker.jsx";
+import { FeedbackModal } from "./training/FeedbackModal.jsx";
 
 const BACKEND_WSS_URL = import.meta.env.VITE_BACKEND_WSS_URL || null;
 
@@ -1775,6 +1779,12 @@ function MobileLayout() {
     liveAudio.setTrainingMode(training.active);
   }, [training.active, liveAudio]);
 
+  const trainingCtxMobile = useTraining();
+  useEffect(() => {
+    const sid = trainingCtxMobile.session?.id;
+    if (sid && typeof sid === "number") liveAudio.setTrainingSession(sid);
+  }, [trainingCtxMobile.session, liveAudio]);
+
   const mobilePttDown = useCallback(() => {
     training.setPttHeld(true);
     liveAudio.setPttState(true);
@@ -2045,10 +2055,11 @@ function MobileLayout() {
             <Send size={16} color={T.white} />
           </button>
         </div>
-        <button onClick={handleAskAI} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 12, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
-          <Zap size={16} color={T.white} />
-          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 13, color: T.white }}>Ask AI</span>
+        <button onClick={handleAskAI} disabled={liveAudio.isAiThinking} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", background: liveAudio.isAiThinking ? "rgba(255,255,255,0.08)" : `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 12, cursor: liveAudio.isAiThinking ? "wait" : "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.3)", opacity: liveAudio.isAiThinking ? 0.7 : 1, transition: "opacity 0.2s" }}>
+          <Zap size={16} color={T.white} style={liveAudio.isAiThinking ? { animation: "askAiPulse 1s ease-in-out infinite" } : {}} />
+          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 13, color: T.white }}>{liveAudio.isAiThinking ? "Thinking..." : "Ask AI"}</span>
         </button>
+        {liveAudio.isAiThinking && <style>{`@keyframes askAiPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }`}</style>}
       </div>
     </div>
   );
@@ -2436,6 +2447,12 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     liveAudio.setTrainingMode(training.active);
   }, [training.active, liveAudio]);
 
+  const trainingCtxDesktop = useTraining();
+  useEffect(() => {
+    const sid = trainingCtxDesktop.session?.id;
+    if (sid && typeof sid === "number") liveAudio.setTrainingSession(sid);
+  }, [trainingCtxDesktop.session, liveAudio]);
+
   const pttDown = useCallback(() => {
     training.setPttHeld(true);
     liveAudio.setPttState(true);
@@ -2812,10 +2829,10 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           <button style={{ background: "none", border: "none", cursor: "pointer", padding: "8px 4px" }}><Mic size={15} color="rgba(255,255,255,0.2)" /></button>
           <button onClick={handleAskAI} style={{ background: T.teal, border: "none", borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}><Send size={14} color={T.white} /></button>
         </div>
-        <button onClick={handleAskAI} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 16px", background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 12, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
+        <button onClick={handleAskAI} disabled={liveAudio.isAiThinking} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 16px", background: liveAudio.isAiThinking ? "rgba(255,255,255,0.08)" : `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 12, cursor: liveAudio.isAiThinking ? "wait" : "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.2)", opacity: liveAudio.isAiThinking ? 0.7 : 1, transition: "opacity 0.2s" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <Zap size={14} color={T.white} />
-            <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: T.white }}>Ask AI</span>
+            <Zap size={14} color={T.white} style={liveAudio.isAiThinking ? { animation: "askAiPulse 1s ease-in-out infinite" } : {}} />
+            <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: T.white }}>{liveAudio.isAiThinking ? "Thinking..." : "Ask AI"}</span>
           </div>
           <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.45)", letterSpacing: "0.02em" }}>⌘ Enter</span>
         </button>
@@ -2909,9 +2926,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
               style={{ flex: 1, background: "none", border: "none", outline: "none", fontFamily: T.body, fontSize: scaledFont(12), color: T.white, padding: "7px 0" }} />
             <button onClick={handleAskAI} style={{ background: T.teal, border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer" }}><Send size={12} color={T.white} /></button>
           </div>
-          <button onClick={handleAskAI} style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 12px", background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
-            <Zap size={13} color={T.white} />
-            <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: scaledFont(11), color: T.white }}>Ask AI</span>
+          <button onClick={handleAskAI} disabled={liveAudio.isAiThinking} style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 12px", background: liveAudio.isAiThinking ? "rgba(255,255,255,0.08)" : `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 10, cursor: liveAudio.isAiThinking ? "wait" : "pointer", whiteSpace: "nowrap", opacity: liveAudio.isAiThinking ? 0.7 : 1 }}>
+            <Zap size={13} color={T.white} style={liveAudio.isAiThinking ? { animation: "askAiPulse 1s ease-in-out infinite" } : {}} />
+            <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: scaledFont(11), color: T.white }}>{liveAudio.isAiThinking ? "Thinking..." : "Ask AI"}</span>
           </button>
         </div>
 
@@ -3172,6 +3189,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
 // ─── Training Notes — Desktop (draggable) ───
 function TrainingNotesDesktop({ elapsedMs }) {
+  const trainingCtx = useTraining();
   const [trainingFlags, setTrainingFlags] = useState([]);
   const [minimized, setMinimized] = useState(false);
   const [noteInput, setNoteInput] = useState("");
@@ -3194,7 +3212,8 @@ function TrainingNotesDesktop({ elapsedMs }) {
     setTrainingFlags(prev => [...prev, { timestamp: elapsedMs, note: text, createdAt: Date.now() }]);
     setNoteInput("");
     noteRef.current?.focus();
-  }, [noteInput, elapsedMs]);
+    trainingCtx?.addFlag(elapsedMs, text);
+  }, [noteInput, elapsedMs, trainingCtx]);
 
   const handleRemoveFlag = useCallback((i) => {
     setTrainingFlags(prev => prev.filter((_, idx) => idx !== i));
@@ -3365,10 +3384,42 @@ export default function MacOSDesktopMockup() {
   const isMobile = useIsMobile();
   const [mode, setMode] = useState("expanded");
   const [opacity, setOpacity] = useState(0.82);
-  // Call lifecycle lives in LeadContext so the Five9 mock, the overlay,
-  // and any future P4 CallKit listener can all agree on whether a call
-  // is active.
-  const { call } = useLead();
+  const { call, training } = useLead();
+  const trainingCtx = useTraining();
+  const [showScenarioPicker, setShowScenarioPicker] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const prevCallState = useRef(call.state);
+
+  // Show scenario picker when training mode is activated and no scenario selected
+  useEffect(() => {
+    if (training.active && trainingCtx.testerName && !trainingCtx.scenario && call.state === "idle") {
+      setShowScenarioPicker(true);
+    }
+  }, [training.active, trainingCtx.testerName, trainingCtx.scenario, call.state]);
+
+  // Show feedback modal when call ends during training
+  useEffect(() => {
+    if (prevCallState.current === "active" && call.state === "ended" && training.active && trainingCtx.scenario) {
+      setShowFeedback(true);
+    }
+    prevCallState.current = call.state;
+  }, [call.state, training.active, trainingCtx.scenario]);
+
+  const handleScenarioSelect = async (scenario) => {
+    setShowScenarioPicker(false);
+    await trainingCtx.startSession(scenario);
+  };
+
+  const handleFeedbackSubmit = async ({ rating, feedbackText }) => {
+    const durationMs = call.endedAt && call.startedAt ? call.endedAt - call.startedAt : null;
+    await trainingCtx.finishSession({ rating, feedbackText, durationMs });
+    setShowFeedback(false);
+  };
+
+  const handleFeedbackSkip = () => {
+    trainingCtx.reset();
+    setShowFeedback(false);
+  };
 
   if (isMobile) return <MobileLayout />;
 
@@ -3402,6 +3453,20 @@ export default function MacOSDesktopMockup() {
           style={{ width: 80, accentColor: T.teal }} />
         <span style={{ fontFamily: T.mono, fontSize: 10, color: T.teal }}>{Math.round(opacity * 100)}%</span>
       </div>
+
+      {/* Training flow modals */}
+      {training.active && <TesterNameGate />}
+      {showScenarioPicker && training.active && trainingCtx.testerName && (
+        <ScenarioPicker onSelect={handleScenarioSelect} />
+      )}
+      {showFeedback && (
+        <FeedbackModal
+          scenario={trainingCtx.scenario}
+          durationMs={call.endedAt && call.startedAt ? call.endedAt - call.startedAt : null}
+          onSubmit={handleFeedbackSubmit}
+          onSkip={handleFeedbackSkip}
+        />
+      )}
     </div>
   );
 }

@@ -88,6 +88,10 @@ export class SuggestionEngine {
     /** @type {number|null} */
     this.callTimerMs = null;
     this.debouncer = new Debouncer({ cooldownMs: opts.cooldownMs ?? 8_000, now: this.now });
+    /** @type {Object|null} Training scenario context injected at session start. */
+    this.trainingContext = null;
+    /** @type {string|null} Best-effort call flow stage detected by Claude. */
+    this.callStage = "tpmo_disclosure";
     /** @type {Set<string>} PECL ids already auto-marked this session. */
     this.peclMarked = new Set();
     /** @type {number|null} last timestamp of a client (non-agent) question */
@@ -102,6 +106,11 @@ export class SuggestionEngine {
   /** @param {Object|null} lead */
   setLead(lead) {
     this.lead = lead ?? null;
+  }
+
+  /** @param {Object|null} ctx Training scenario context from DB. */
+  setTrainingContext(ctx) {
+    this.trainingContext = ctx ?? null;
   }
 
   /** @param {ScriptState|null} state */
@@ -313,10 +322,14 @@ export class SuggestionEngine {
           transcriptWindow: this.window.slice(),
           scriptState: this.scriptState,
           callTimerMs: this.callTimerMs,
+          trainingContext: this.trainingContext,
+          callStage: this.callStage,
           onJsonDelta: (delta) =>
             this.emit({ type: "suggestion_delta", id, kind: trigger.kind, delta }),
-          onComplete: ({ suggestion }) =>
-            this.emit({ type: "suggestion_done", id, kind: trigger.kind, suggestion }),
+          onComplete: ({ suggestion }) => {
+            if (suggestion?.call_stage) this.callStage = suggestion.call_stage;
+            this.emit({ type: "suggestion_done", id, kind: trigger.kind, suggestion });
+          },
         }
       );
     } catch (err) {

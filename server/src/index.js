@@ -7,12 +7,15 @@
  */
 
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { loadEnv } from "./env.js";
 import { createLogger } from "./logger.js";
 import healthRoutes from "./routes/health.js";
 import streamRoutes from "./routes/stream.js";
+import trainingRoutes from "./routes/training.js";
 import { preflight } from "./preflight.js";
+import { getPool, closePool } from "./db.js";
 
 /**
  * @param {Partial<import("./env.js").Env>} [envOverrides]
@@ -49,12 +52,32 @@ export async function build(envOverrides = {}, opts = {}) {
     app.decorate("suggestionEngineFactory", opts.suggestionEngineFactory);
   }
 
+  await app.register(cors, {
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:4173",
+      /\.vercel\.app$/,
+    ],
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "x-admin-key"],
+    credentials: true,
+  });
+
   await app.register(websocket, {
     options: { maxPayload: 1024 * 1024 }, // 1 MiB — audio frames stay well below this
   });
 
+  // Init DB pool if DATABASE_URL is configured (training platform)
+  if (env.databaseUrl) {
+    getPool(env.databaseUrl);
+  }
+
   await app.register(healthRoutes);
   await app.register(streamRoutes);
+
+  if (env.databaseUrl) {
+    await app.register(trainingRoutes);
+  }
 
   // Root — quick sanity check if someone curls the service
   app.get("/", async () => ({
@@ -86,6 +109,7 @@ if (isMain) {
       app.log.info({ sig }, "server: shutting down");
       try {
         await app.close();
+        await closePool();
         process.exit(0);
       } catch (err) {
         app.log.error({ err }, "server: shutdown error");

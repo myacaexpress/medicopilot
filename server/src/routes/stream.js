@@ -43,6 +43,8 @@ import { redact } from "../redact.js";
 import { createDeepgramSession } from "../deepgram.js";
 import { SuggestionEngine } from "../suggestions/engine.js";
 import { createAnthropicClient } from "../suggestions/claude.js";
+import { getScenarioById } from "./training.js";
+import { query } from "../db.js";
 
 /**
  * @param {import("fastify").FastifyInstance} app
@@ -86,6 +88,9 @@ export default async function streamRoutes(app) {
     let speakerLocked = false;
     let trainingMode = false;
     let pttSpeaking = false;
+    /** @type {number|null} DB session ID — only set in training mode. */
+    let trainingSessionId = null;
+    let sessionStartedAt = null;
 
     const mapSpeaker = (dgSpeaker) => {
       if (trainingMode) {
@@ -117,7 +122,35 @@ export default async function streamRoutes(app) {
         client: sClient,
         model: suggestionModel,
         log,
-        emit: (event) => send({ ...event, sessionId }),
+        emit: (event) => {
+          send({ ...event, sessionId });
+          // Persist completed suggestions in training mode
+          if (
+            event.type === "suggestion_done" &&
+            trainingMode &&
+            trainingSessionId &&
+            sessionStartedAt &&
+            event.suggestion
+          ) {
+            const tsMs = Date.now() - sessionStartedAt;
+            const s = event.suggestion;
+            query(
+              `INSERT INTO training_ai_suggestions
+                 (session_id, say_this, trigger_info, call_stage, follow_up_questions, timestamp_ms)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [
+                trainingSessionId,
+                s.primary || s.sayThis || null,
+                event.kind ? JSON.stringify({ kind: event.kind }) : null,
+                s.call_stage || null,
+                s.followUps ? JSON.stringify(s.followUps) : null,
+                tsMs,
+              ]
+            ).catch((err) =>
+              log.warn({ err: err.message }, "stream: suggestion persist failed")
+            );
+          }
+        },
         opts: {
           windowMs: suggestionWindowMs,
           cooldownMs: suggestionDebounceMs,
@@ -173,6 +206,17 @@ export default async function streamRoutes(app) {
               ts: u.ts,
               redactionCounts: counts,
             });
+            // Persist transcript in training mode (fire-and-forget)
+            if (trainingMode && trainingSessionId && sessionStartedAt) {
+              const tsMs = Date.now() - sessionStartedAt;
+              query(
+                `INSERT INTO training_transcripts (session_id, speaker, text, timestamp_ms)
+                 VALUES ($1, $2, $3, $4)`,
+                [trainingSessionId, role, redacted, tsMs]
+              ).catch((err) =>
+                log.warn({ err: err.message }, "stream: transcript persist failed")
+              );
+            }
             // Feed the (already-redacted) utterance into the engine.
             // Fire-and-forget — the engine emits its own events back
             // through `send`, and any failure is logged inside.
@@ -289,6 +333,31 @@ export default async function streamRoutes(app) {
             speakerLocked = false;
           }
           log.info({ trainingMode }, "stream: training mode toggled");
+          return;
+        case "set_training_scenario":
+          if (msg.scenarioId && engine) {
+            getScenarioById(msg.scenarioId)
+              .then((scenario) => {
+                if (scenario) {
+                  engine.setTrainingContext(scenario);
+                  log.info({ scenarioId: msg.scenarioId }, "stream: training scenario loaded");
+                  send({ type: "training_scenario_loaded", sessionId, scenarioId: msg.scenarioId });
+                } else {
+                  sendError("scenario_not_found", `Scenario ${msg.scenarioId} not found`);
+                }
+              })
+              .catch((err) => {
+                log.warn({ err: err.message }, "stream: failed to load training scenario");
+                sendError("scenario_load_failed", err.message);
+              });
+          }
+          return;
+        case "set_training_session":
+          if (typeof msg.sessionId === "number") {
+            trainingSessionId = msg.sessionId;
+            sessionStartedAt = Date.now();
+            log.info({ trainingSessionId }, "stream: training session ID set");
+          }
           return;
         case "ptt_state":
           pttSpeaking = !!msg.speaking;

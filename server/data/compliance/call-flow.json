@@ -1,0 +1,287 @@
+{
+  "version": "PY2026",
+  "stages": [
+    {
+      "id": "tpmo_disclosure",
+      "name": "TPMO Disclosure",
+      "order": 1,
+      "required": true,
+      "timing": "within_first_60_seconds",
+      "verbatim": true,
+      "description": "Third-party marketing org disclosure — must be read verbatim within the first minute",
+      "variants": {
+        "not_all_plans": "We do not offer every plan available in your area. Currently we represent [number] organizations which offer [number] products in your area. Please contact Medicare.gov, 1-800-MEDICARE, or your local State Health Insurance Program (SHIP) to get information on all of your options.",
+        "all_plans": "Currently we represent [number] organizations which offer [number] products in your area. You can always contact Medicare.gov, 1-800-MEDICARE, or your local State Health Insurance Program (SHIP) for help with plan choices."
+      },
+      "agent_coaching": "If 60 seconds have passed and TPMO hasn't been read, IMMEDIATELY prompt the agent. This is a hard compliance requirement.",
+      "next": "recording_consent"
+    },
+    {
+      "id": "recording_consent",
+      "name": "Recording Consent",
+      "order": 2,
+      "required": true,
+      "verbatim": false,
+      "description": "Inform caller the call is recorded for quality and training purposes",
+      "key_phrase": "This call will be recorded for quality and training purposes; is it ok if I continue?",
+      "if_declined": "End the call using Close Call scripting",
+      "next": "collection_basic_info"
+    },
+    {
+      "id": "collection_basic_info",
+      "name": "Collection of Basic Information",
+      "order": 3,
+      "required": true,
+      "verbatim": false,
+      "fields": ["first_name", "last_name", "phone_callback", "zip_code", "county", "state"],
+      "note": "Information is voluntary. If caller declines, move forward.",
+      "next": "scope_of_appointment"
+    },
+    {
+      "id": "scope_of_appointment",
+      "name": "Scope of Appointment (SOA)",
+      "order": 4,
+      "required": true,
+      "verbatim": false,
+      "inbound_rule": "Must be collected on every inbound call",
+      "outbound_rule": "Must be completed 48 hours prior to outbound call",
+      "products_to_list": [
+        "Medicare Advantage Plans (Part C)",
+        "Medicare Prescription Drug Plans (Part D)",
+        "Medicare Supplement (Medigap)",
+        "Dental/Vision/Hearing",
+        "Hospital Indemnity"
+      ],
+      "key_disclosures": [
+        "This conversation has no effect on your current or future health coverage unless you enroll in a plan today.",
+        "Talking to me does not obligate you to enroll or automatically enroll you in a plan."
+      ],
+      "requires_affirmative_response": true,
+      "next": "qualification_poa"
+    },
+    {
+      "id": "qualification_poa",
+      "name": "Healthcare Decisions / POA",
+      "order": 5,
+      "required": true,
+      "verbatim": false,
+      "key_question": "Are you interested in discussing Medicare plan options for yourself or for someone else?",
+      "if_self": "Do you usually have help making your healthcare decisions?",
+      "if_poa_needed": "Agent must verify legal representative status and document name, relationship, authority type",
+      "competency_note": "Watch for competency issues throughout the call even if beneficiary says they make own decisions",
+      "next": "qualification_eligibility"
+    },
+    {
+      "id": "qualification_eligibility",
+      "name": "Medicare Eligibility",
+      "order": 6,
+      "required": true,
+      "key_question": "Do you have or will soon have Medicare Parts A and B?",
+      "if_no_parts_ab": "Not eligible for MA plan. May qualify for Part D only.",
+      "if_only_part_a": "Not eligible for MA. Eligible for PDP with Part A and/or B.",
+      "next": "qualification_address"
+    },
+    {
+      "id": "qualification_address",
+      "name": "Permanent Address / Contact",
+      "order": 7,
+      "required": true,
+      "fields": ["permanent_address", "phone", "email"],
+      "tcpa_required": true,
+      "tcpa_text": "Does [Agency] have permission to have a licensed sales agent contact you in the future about plan information and your Medicare enrollment options? Your consent is voluntary and allows us to contact you via text messaging, even if the number is on a Do Not Call registry.",
+      "next": "qualification_other_coverage"
+    },
+    {
+      "id": "qualification_other_coverage",
+      "name": "Other Coverage / Retirement Benefits",
+      "order": 8,
+      "required": true,
+      "key_question": "Do you have other coverage currently such as an Employer, Individual Major Medical, Employer Group Medicare plan, retirement benefits, VA benefits or Tricare for Life/ChampVA?",
+      "special_handling": {
+        "tricare": "Benefits are generally MORE comprehensive than MA. Enrolling in MA is NOT recommended. Agent must explain Tricare becomes secondary, network restrictions apply, claims coordination burden falls on beneficiary.",
+        "champva": "Same as Tricare — NOT recommended to enroll in MA.",
+        "va": "VA Healthcare and MA are separate. VA cannot bill MA and MA cannot bill VA. MA may be helpful for additional civilian provider access.",
+        "employer_union": "Enrolling in MAPD or PDP may impact ability to keep Union/Employer coverage. Recommend talking to plan administrator first."
+      },
+      "next": "qualification_election_period"
+    },
+    {
+      "id": "qualification_election_period",
+      "name": "Election Period Determination",
+      "order": 9,
+      "required": true,
+      "critical": true,
+      "during_aep": "October 15 - December 7. Probe for other SEPs with earlier effective dates.",
+      "during_oep": "January 1 - March 31. One change allowed for existing MA enrollees.",
+      "outside_aep_oep": "Must determine SEP eligibility. If no SEP, cannot enroll.",
+      "sep_questions": [
+        "Are you new to Medicare? (ICEP)",
+        "MA OEP change?",
+        "Recently moved outside plan service area?",
+        "Released from incarceration?",
+        "Returned to US after living abroad?",
+        "Obtained lawful presence status?",
+        "Change in Medicaid status?",
+        "Change in Extra Help/LIS?",
+        "Dual eligible (Medicare + Medicaid)?",
+        "Moving into/out of Long Term Care?",
+        "Left PACE program?",
+        "Involuntarily lost creditable Rx coverage?",
+        "Losing employer/union coverage?",
+        "State pharmacy assistance program?",
+        "Auto-enrolled by Medicare/state, want different plan?",
+        "Plan ending Medicare contract?",
+        "Plan had <3 stars for 3 years, want 3+ star plan?",
+        "Plan taken over by state for financial issues?",
+        "Lost SNP qualification?",
+        "Affected by FEMA disaster?",
+        "5-star plan available in county? (5-star SEP)"
+      ],
+      "if_no_sep": "Cannot enroll. Advise to call back during AEP (Oct 15 - Dec 7).",
+      "next": "neads_analysis"
+    },
+    {
+      "id": "neads_analysis",
+      "name": "NEADS Analysis",
+      "order": 10,
+      "required": true,
+      "acronym": "Now, Enjoy, Alter, Decision-maker, Solutions",
+      "cms_required_topics": [
+        "Primary care providers and specialists (in-network status)",
+        "Prescription drug coverage and costs (formulary check)",
+        "Costs of health care services",
+        "Premiums",
+        "Benefits",
+        "Specific health care needs"
+      ],
+      "key_questions": [
+        "What is your current coverage?",
+        "Who is your primary care physician?",
+        "Do you see any specialists?",
+        "What medications do you take regularly?",
+        "What do you enjoy about your current coverage?",
+        "What would you alter?",
+        "Any preference for HMO vs PPO?",
+        "Is travel part of your lifestyle?",
+        "Dental/vision/hearing needs?",
+        "Interest in OTC allowance, transportation, fitness?"
+      ],
+      "must_offer": [
+        "Provider network lookup",
+        "Prescription formulary lookup",
+        "Pharmacy network check"
+      ],
+      "recap_required": true,
+      "snp_disclosures": {
+        "csnp": "Physician verification required within 30 days. If not completed, enrollment voided.",
+        "dsnp": "Eligibility based on verification of Medicare AND qualifying Medicaid level."
+      },
+      "next": "plan_presentation"
+    },
+    {
+      "id": "plan_presentation",
+      "name": "Plan Presentation",
+      "order": 11,
+      "required": true,
+      "must_cover": [
+        "Premium",
+        "Medical deductible",
+        "Part B deductible",
+        "Part D deductible and applicable tiers",
+        "PCP copay",
+        "Specialist copay",
+        "Inpatient hospital",
+        "Outpatient hospital",
+        "Emergency room",
+        "Urgent care",
+        "Mental health (inpatient + outpatient)",
+        "Preventive care",
+        "Dental/vision/hearing costs and limits",
+        "SNF benefits",
+        "PT/rehab benefits",
+        "MOOP (in-network and OON for PPO)",
+        "Coverage outside US",
+        "OTC/transportation/fitness if applicable",
+        "SSBCI disclaimers if applicable",
+        "Where to find SOB and star ratings"
+      ],
+      "pdp_specific": [
+        "Monthly premium",
+        "Rx deductible",
+        "Tier copays (30-day retail)",
+        "Coverage gap stage",
+        "Catastrophic stage",
+        "Offer medication lookup — if declined, remind importance"
+      ],
+      "non_renewing_plan_verbatim": "[Plan] will not be available effective January. Coverage ends Dec 31. Must enroll in new plan by Dec 31 for Jan 1 effective date.",
+      "part_b_reduction_verbatim": "There may be a delay in the application of the Part B premium reduction. The reduction is not immediate and may take one or more payment cycles...",
+      "next": "pecl"
+    },
+    {
+      "id": "pecl",
+      "name": "Pre-Enrollment Checklist",
+      "order": 12,
+      "required": true,
+      "verbatim": true,
+      "items": [
+        "Evidence of Coverage (EOC)",
+        "Provider directory",
+        "Pharmacy directory",
+        "Formulary",
+        "Premiums/copayments/coinsurance",
+        "Emergency/urgent coverage",
+        "Plan-type rules (HMO/PPO/PFFS network requirements)",
+        "Effect on current coverage"
+      ],
+      "effect_on_coverage_detail": "If currently in MA, current coverage ends when new starts. If Tricare, may be affected. If Medigap, may want to drop (paying for unusable coverage).",
+      "next": "enrollment"
+    },
+    {
+      "id": "enrollment",
+      "name": "Enrollment",
+      "order": 13,
+      "required": true,
+      "verbatim": true,
+      "plan_disclosures": {
+        "ma_mapd": "[Carrier] is a Medicare Advantage [HMO/PPO/PFFS] organization with a Medicare contract. Enrollment depends on contract renewal. Must keep Parts A and B. Must continue paying Part B premium. Can only be in one MA plan at a time. MA is NOT Medicare Supplement insurance.",
+        "pdp": "[Carrier] is a stand-alone PDP with a Medicare contract. Must keep Parts A and/or B. Enrollment ends enrollment in other Medicare health or drug plan.",
+        "hmo": "Must use participating providers except in emergency.",
+        "hmo_csnp": "Must use participating providers. Physician must verify chronic condition within 30 days or enrollment voided.",
+        "dsnp": "Non-contracted providers not obligated to treat except emergency/urgent. Eligibility based on Medicare AND qualifying Medicaid level.",
+        "dsnp_florida": "Plan sponsored by [Carrier] and State of Florida Agency For Health Care Administration. DSNP with Florida Medicaid Contract.",
+        "dsnp_tennessee": "TennCare is not responsible for payment except appropriate cost sharing. TennCare does not guarantee availability or quality of these benefits.",
+        "ppo_pffs": "Out-of-network providers under no obligation to treat except emergency.",
+        "late_enrollment": "May have to pay late enrollment penalty if no prior creditable coverage.",
+        "privacy": "By joining this plan, I acknowledge [Plan] will share my information with Medicare..."
+      },
+      "signature_confirmations": [
+        "Do you understand the benefits and conditions of enrollment?",
+        "Do you understand we will release information to Medicare for treatment, payment, and operations?",
+        "Do you understand you are enrolling for a monthly premium of no more than [$amount]?"
+      ],
+      "post_enrollment": [
+        "Provide application/confirmation number",
+        "State proposed effective date (subject to Medicare approval)",
+        "Advise materials + ID card arriving in 7-10 business days",
+        "Provide customer service number",
+        "Provide agent callback number"
+      ],
+      "next": "close"
+    },
+    {
+      "id": "close",
+      "name": "Closing the Call",
+      "order": 14,
+      "required": true,
+      "script": "It's been a pleasure speaking with you today. If you have any family members or friends that would benefit by speaking with me, please give them my number and I would be happy to assist them too."
+    }
+  ],
+  "prohibited_statements": [
+    "Do NOT claim plan is recommended/endorsed by CMS or Medicare",
+    "Do NOT use unsubstantiated superlatives (best, most popular)",
+    "Do NOT use the word 'free' for zero-dollar premiums or cost reductions",
+    "Do NOT ask for SSN/bank/credit card except during enrollment",
+    "Do NOT market non-health products during the call",
+    "Do NOT require SSN or MBI just to discuss plan options"
+  ]
+}

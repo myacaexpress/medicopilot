@@ -20,6 +20,8 @@
       ]
     }
   ],
-  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/" }
+  ],
   "trailingSlash": false
 }
