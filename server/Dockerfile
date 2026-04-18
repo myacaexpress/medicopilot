@@ -8,8 +8,9 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
-# Copy source
+# Copy source + data
 COPY src ./src
+COPY data ./data
 
 # Fly.io passes PORT via env. Default 8080 matches fly.toml.
 ENV NODE_ENV=production
