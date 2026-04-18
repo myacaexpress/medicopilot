@@ -22,7 +22,6 @@ import { useLiveAudio } from "./audio/index.js";
 import { useTraining } from "./training/TrainingContext.jsx";
 import { TesterNamePrompt } from "./training/TesterNamePrompt.jsx";
 import { ScenarioPicker } from "./training/ScenarioPicker.jsx";
-import { SoloToggle } from "./training/SoloToggle.jsx";
 import { TrainingNotesPanel } from "./training/TrainingNotesPanel.jsx";
 
 const BACKEND_WSS_URL = import.meta.env.VITE_BACKEND_WSS_URL || null;
@@ -2673,14 +2672,8 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   };
 
   // ─── Shared desktop input bar ───
-  const showPtt = training.active && callActive;
   const DesktopInputBar = ({ style = {} }) => (
     <div data-no-drag="true" style={{ padding: "10px 14px", borderTop: "1px solid rgba(255,255,255,0.06)", cursor: "default", flexShrink: 0, ...style }}>
-      {showPtt && (
-        <div data-testid="ptt-mic-button" style={{ marginBottom: 8 }}>
-          <SoloToggle onRoleChange={handleSoloRoleChange} />
-        </div>
-      )}
       <div style={{ display: "flex", gap: 6 }}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "2px 2px 2px 12px" }}>
           <input placeholder="Type or press ⌘Enter for AI response..." value={inputVal} onChange={e => setInputVal(e.target.value)}
@@ -3038,6 +3031,14 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           </svg>
         </div>
       </div>
+      {training.active && (
+        <TrainingNotesPanel
+          onRoleChange={handleSoloRoleChange}
+          transcripts={liveAudio.transcripts}
+          suggestions={liveAudio.suggestions}
+          callActive={callActive}
+        />
+      )}
     </>
   );
 }
@@ -3052,7 +3053,6 @@ export default function MacOSDesktopMockup() {
   const [opacity, setOpacity] = useState(0.82);
   const { call, training } = useLead();
   const trainingCtx = useTraining();
-  const showTrainingPanel = training.active && call.state === "active" && trainingCtx.activeSession;
   const [showNamePromptMain, setShowNamePromptMain] = useState(false);
   const [showScenarioPickerMain, setShowScenarioPickerMain] = useState(false);
 
@@ -3115,7 +3115,6 @@ export default function MacOSDesktopMockup() {
           style={{ width: 80, accentColor: T.teal }} />
         <span style={{ fontFamily: T.mono, fontSize: 10, color: T.teal }}>{Math.round(opacity * 100)}%</span>
       </div>
-      {showTrainingPanel && <TrainingNotesPanel />}
     </div>
   );
 }

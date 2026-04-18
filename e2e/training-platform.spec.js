@@ -3,6 +3,9 @@ import { installAllMocks } from "./fixtures/index.js";
 
 test.describe("training platform", () => {
   test("tester name prompt appears when training ON and Start Call", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("trainingOnboardingDone", "1");
+    });
     await installAllMocks(page);
     await page.goto("/");
 
@@ -26,9 +29,9 @@ test.describe("training platform", () => {
   });
 
   test("scenario picker shows all scenarios", async ({ page }) => {
-    // Set name via addInitScript so it's available before React mounts.
     await page.addInitScript(() => {
       localStorage.setItem("trainingTesterName", "Michael");
+      localStorage.setItem("trainingOnboardingDone", "1");
     });
     await installAllMocks(page);
     await page.goto("/");
@@ -53,6 +56,7 @@ test.describe("training platform", () => {
   test("selecting a scenario starts training call with solo toggle", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem("trainingTesterName", "Michael");
+      localStorage.setItem("trainingOnboardingDone", "1");
     });
     await installAllMocks(page);
     await page.goto("/");
@@ -80,6 +84,7 @@ test.describe("training platform", () => {
   test("solo toggle switches between agent and client", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem("trainingTesterName", "Michael");
+      localStorage.setItem("trainingOnboardingDone", "1");
     });
     await installAllMocks(page);
     await page.goto("/");
@@ -111,6 +116,7 @@ test.describe("training platform", () => {
   test("flag button opens form and submits", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem("trainingTesterName", "Michael");
+      localStorage.setItem("trainingOnboardingDone", "1");
     });
     await installAllMocks(page);
     await page.goto("/");
@@ -145,6 +151,9 @@ test.describe("training platform", () => {
   });
 
   test("tester name persists across page loads", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("trainingOnboardingDone", "1");
+    });
     await installAllMocks(page);
     await page.goto("/");
 
@@ -161,5 +170,32 @@ test.describe("training platform", () => {
     // Verify localStorage was set.
     const storedName = await page.evaluate(() => localStorage.getItem("trainingTesterName"));
     expect(storedName).toBe("Jane");
+  });
+
+  test("onboarding tooltip shows on first visit and dismisses", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("trainingTesterName", "Michael");
+    });
+    await installAllMocks(page);
+    await page.goto("/");
+
+    // Turn on training mode — onboarding should appear.
+    await page.getByTestId("training-toggle").first().click();
+
+    await expect(page.getByTestId("training-onboarding")).toBeVisible();
+    await expect(page.getByText("Welcome to Training Mode")).toBeVisible();
+
+    // Click through all steps.
+    await page.getByTestId("onboarding-next").click();
+    await expect(page.getByText("Pick a Scenario")).toBeVisible();
+    await page.getByTestId("onboarding-next").click();
+    await expect(page.getByText("Switch Speakers")).toBeVisible();
+    await page.getByTestId("onboarding-next").click();
+    await expect(page.getByText("Flag Moments")).toBeVisible();
+    await page.getByTestId("onboarding-next").click();
+
+    // Onboarding should be dismissed, training notes panel should appear.
+    await expect(page.getByTestId("training-onboarding")).not.toBeVisible();
+    await expect(page.getByTestId("training-notes-panel")).toBeVisible();
   });
 });

@@ -3,6 +3,9 @@ import { installAllMocks } from "./fixtures/index.js";
 
 test.describe("training mode", () => {
   test("training pill toggles in header", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("trainingOnboardingDone", "1");
+    });
     await installAllMocks(page);
     await page.goto("/");
 
@@ -16,6 +19,9 @@ test.describe("training mode", () => {
   });
 
   test("training pill visible during active call", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("trainingOnboardingDone", "1");
+    });
     await installAllMocks(page);
     await page.goto("/");
 
@@ -33,6 +39,7 @@ test.describe("training mode", () => {
   test("training mode persists across call end", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem("trainingTesterName", "Tester");
+      localStorage.setItem("trainingOnboardingDone", "1");
     });
     await installAllMocks(page);
     await page.goto("/");
@@ -59,6 +66,7 @@ test.describe("solo toggle (replaces push-to-talk)", () => {
   test("solo toggle visible in training mode during call", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem("trainingTesterName", "Tester");
+      localStorage.setItem("trainingOnboardingDone", "1");
     });
     await installAllMocks(page);
     await page.goto("/");
@@ -69,7 +77,7 @@ test.describe("solo toggle (replaces push-to-talk)", () => {
 
     await expect(page.getByText(/CONNECTED/i).first()).toBeVisible();
 
-    // Solo toggle buttons should be visible.
+    // Solo toggle buttons should be visible in the training notes panel.
     await expect(page.getByTestId("solo-role-agent").first()).toBeVisible();
     await expect(page.getByTestId("solo-role-client").first()).toBeVisible();
     await expect(page.getByTestId("solo-toggle-hint").first()).toBeVisible();
@@ -78,6 +86,7 @@ test.describe("solo toggle (replaces push-to-talk)", () => {
   test("space bar toggles between agent and client", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem("trainingTesterName", "Tester");
+      localStorage.setItem("trainingOnboardingDone", "1");
     });
     await installAllMocks(page);
     await page.goto("/");
@@ -99,6 +108,9 @@ test.describe("solo toggle (replaces push-to-talk)", () => {
   });
 
   test("solo toggle not visible without training mode", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("trainingOnboardingDone", "1");
+    });
     await installAllMocks(page);
     await page.goto("/");
 
