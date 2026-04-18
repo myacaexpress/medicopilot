@@ -71,11 +71,11 @@ test("streamSuggestion sends cache_control on the system block", async () => {
   const { client, captured } = makeFakeClient(
     [
       // Token-by-token JSON for the tool input
-      { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: "{\"sayThis\":\"" } },
+      { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: "{\"acknowledgment\":\"Got it — asking about Eliquis\",\"say_this\":\"" } },
       { type: "content_block_delta", delta: { type: "input_json_delta", partial_json: "Mrs. Garcia, Eliquis is on the formulary.\"}" } },
       { type: "message_stop" },
     ],
-    { sayThis: "Mrs. Garcia, Eliquis is on the formulary." }
+    { acknowledgment: "Got it — asking about Eliquis", say_this: "Mrs. Garcia, Eliquis is on the formulary." }
   );
 
   await streamSuggestion(
@@ -94,7 +94,7 @@ test("streamSuggestion sends cache_control on the system block", async () => {
   assert.ok(Array.isArray(body.system), "system should be an array of blocks");
   assert.equal(body.system[0].type, "text");
   assert.deepEqual(body.system[0].cache_control, { type: "ephemeral" });
-  assert.ok(body.system[0].text.includes("MediCopilot"));
+  assert.ok(body.system[0].text.includes("senior Medicare sales agent"));
   assert.ok(body.system[0].text.includes("Compliance catalog"));
 
   // Tool wiring
