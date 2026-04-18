@@ -7,6 +7,7 @@
  */
 
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { loadEnv } from "./env.js";
 import { createLogger } from "./logger.js";
@@ -50,6 +51,17 @@ export async function build(envOverrides = {}, opts = {}) {
   if (opts.suggestionEngineFactory) {
     app.decorate("suggestionEngineFactory", opts.suggestionEngineFactory);
   }
+
+  await app.register(cors, {
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:4173",
+      /\.vercel\.app$/,
+    ],
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "x-admin-key"],
+    credentials: true,
+  });
 
   await app.register(websocket, {
     options: { maxPayload: 1024 * 1024 }, // 1 MiB — audio frames stay well below this
