@@ -88,6 +88,8 @@ export class SuggestionEngine {
     /** @type {number|null} */
     this.callTimerMs = null;
     this.debouncer = new Debouncer({ cooldownMs: opts.cooldownMs ?? 8_000, now: this.now });
+    /** @type {Object|null} Training scenario context injected at session start. */
+    this.trainingContext = null;
     /** @type {Set<string>} PECL ids already auto-marked this session. */
     this.peclMarked = new Set();
     /** @type {number|null} last timestamp of a client (non-agent) question */
@@ -102,6 +104,11 @@ export class SuggestionEngine {
   /** @param {Object|null} lead */
   setLead(lead) {
     this.lead = lead ?? null;
+  }
+
+  /** @param {Object|null} ctx Training scenario context from DB. */
+  setTrainingContext(ctx) {
+    this.trainingContext = ctx ?? null;
   }
 
   /** @param {ScriptState|null} state */
@@ -313,6 +320,7 @@ export class SuggestionEngine {
           transcriptWindow: this.window.slice(),
           scriptState: this.scriptState,
           callTimerMs: this.callTimerMs,
+          trainingContext: this.trainingContext,
           onJsonDelta: (delta) =>
             this.emit({ type: "suggestion_delta", id, kind: trigger.kind, delta }),
           onComplete: ({ suggestion }) =>

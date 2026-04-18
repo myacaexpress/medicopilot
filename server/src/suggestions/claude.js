@@ -184,19 +184,37 @@ export const SUGGESTION_TOOL = {
  * @param {number} [args.callTimerMs]  elapsed call time in ms
  * @returns {string}
  */
-export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs }) {
+export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext }) {
   const transcriptStr = (transcriptWindow ?? [])
     .map((u) => `${u.speaker}: ${u.text}`)
     .join("\n");
   const leadStr = lead ? JSON.stringify(lead, null, 2) : "(no lead context yet)";
 
-  const parts = [
+  const parts = [];
+
+  if (trainingContext) {
+    parts.push(
+      "<training_context>",
+      `Scenario: ${trainingContext.title}`,
+      `Persona: ${trainingContext.persona_name}, age ${trainingContext.persona_age || "unknown"}, ${trainingContext.persona_state}`,
+      `Situation: ${trainingContext.situation}`,
+      trainingContext.carrier_prefs ? `Carrier preferences: ${trainingContext.carrier_prefs}` : "",
+      trainingContext.objections?.length ? `Likely objections: ${trainingContext.objections.join("; ")}` : "",
+      trainingContext.medications?.length ? `Medications: ${trainingContext.medications.join(", ")}` : "",
+      trainingContext.success_criteria?.length ? `Success criteria: ${trainingContext.success_criteria.join("; ")}` : "",
+      "NOTE: This is a training call. The 'client' is a tester reading from the scenario above. Tailor suggestions as if this were a real call with this persona.",
+      "</training_context>",
+      "",
+    );
+  }
+
+  parts.push(
     `Trigger: ${trigger.kind} — ${trigger.summary}`,
     trigger.item ? `Trigger payload: ${JSON.stringify(trigger.item)}` : "",
     "",
     "Lead context:",
     leadStr,
-  ];
+  );
 
   if (scriptState) {
     parts.push("", "Script state (PECL checklist):");
@@ -242,6 +260,7 @@ export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, 
  * @property {(delta: string) => void} [onJsonDelta]
  * @property {(payload: { suggestion: any, usage?: any, kind: string }) => void} [onComplete]
  * @property {(err: Error) => void} [onError]
+ * @property {Object} [trainingContext]
  */
 
 /**
@@ -257,9 +276,9 @@ export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, 
  */
 export async function streamSuggestion(
   { client, model, log },
-  { trigger, lead, transcriptWindow, scriptState, callTimerMs, onText, onJsonDelta, onComplete, onError }
+  { trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext, onText, onJsonDelta, onComplete, onError }
 ) {
-  const userPrompt = buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs });
+  const userPrompt = buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext });
 
   const requestBody = {
     model,

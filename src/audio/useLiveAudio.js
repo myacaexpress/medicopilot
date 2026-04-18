@@ -70,5 +70,6 @@ export function useLiveAudio({ url, enabled }) {
     recalibrateSpeakers: socket.recalibrateSpeakers,
     setTrainingMode: socket.setTrainingMode,
     setPttState: socket.setPttState,
+    setTrainingScenario: socket.setTrainingScenario,
   };
 }

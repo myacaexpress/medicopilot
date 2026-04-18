@@ -43,6 +43,7 @@ import { redact } from "../redact.js";
 import { createDeepgramSession } from "../deepgram.js";
 import { SuggestionEngine } from "../suggestions/engine.js";
 import { createAnthropicClient } from "../suggestions/claude.js";
+import { getScenarioById } from "./training.js";
 
 /**
  * @param {import("fastify").FastifyInstance} app
@@ -289,6 +290,24 @@ export default async function streamRoutes(app) {
             speakerLocked = false;
           }
           log.info({ trainingMode }, "stream: training mode toggled");
+          return;
+        case "set_training_scenario":
+          if (msg.scenarioId && engine) {
+            getScenarioById(msg.scenarioId)
+              .then((scenario) => {
+                if (scenario) {
+                  engine.setTrainingContext(scenario);
+                  log.info({ scenarioId: msg.scenarioId }, "stream: training scenario loaded");
+                  send({ type: "training_scenario_loaded", sessionId, scenarioId: msg.scenarioId });
+                } else {
+                  sendError("scenario_not_found", `Scenario ${msg.scenarioId} not found`);
+                }
+              })
+              .catch((err) => {
+                log.warn({ err: err.message }, "stream: failed to load training scenario");
+                sendError("scenario_load_failed", err.message);
+              });
+          }
           return;
         case "ptt_state":
           pttSpeaking = !!msg.speaking;

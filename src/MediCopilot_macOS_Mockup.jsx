@@ -19,6 +19,10 @@ import { useConsentBanner } from "./capture/useConsentBanner.js";
 import { ConsentBanner } from "./capture/ConsentBanner.jsx";
 import { useToast } from "./ui/Toast.jsx";
 import { useLiveAudio } from "./audio/index.js";
+import { useTraining } from "./training/TrainingContext.jsx";
+import { TesterNameGate } from "./training/TesterNameGate.jsx";
+import { ScenarioPicker } from "./training/ScenarioPicker.jsx";
+import { FeedbackModal } from "./training/FeedbackModal.jsx";
 
 const BACKEND_WSS_URL = import.meta.env.VITE_BACKEND_WSS_URL || null;
 
@@ -3172,6 +3176,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
 // ─── Training Notes — Desktop (draggable) ───
 function TrainingNotesDesktop({ elapsedMs }) {
+  const trainingCtx = useTraining();
   const [trainingFlags, setTrainingFlags] = useState([]);
   const [minimized, setMinimized] = useState(false);
   const [noteInput, setNoteInput] = useState("");
@@ -3194,7 +3199,8 @@ function TrainingNotesDesktop({ elapsedMs }) {
     setTrainingFlags(prev => [...prev, { timestamp: elapsedMs, note: text, createdAt: Date.now() }]);
     setNoteInput("");
     noteRef.current?.focus();
-  }, [noteInput, elapsedMs]);
+    trainingCtx?.addFlag(elapsedMs, text);
+  }, [noteInput, elapsedMs, trainingCtx]);
 
   const handleRemoveFlag = useCallback((i) => {
     setTrainingFlags(prev => prev.filter((_, idx) => idx !== i));
@@ -3365,10 +3371,42 @@ export default function MacOSDesktopMockup() {
   const isMobile = useIsMobile();
   const [mode, setMode] = useState("expanded");
   const [opacity, setOpacity] = useState(0.82);
-  // Call lifecycle lives in LeadContext so the Five9 mock, the overlay,
-  // and any future P4 CallKit listener can all agree on whether a call
-  // is active.
-  const { call } = useLead();
+  const { call, training } = useLead();
+  const trainingCtx = useTraining();
+  const [showScenarioPicker, setShowScenarioPicker] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const prevCallState = useRef(call.state);
+
+  // Show scenario picker when training mode is activated and no scenario selected
+  useEffect(() => {
+    if (training.active && trainingCtx.testerName && !trainingCtx.scenario && call.state === "idle") {
+      setShowScenarioPicker(true);
+    }
+  }, [training.active, trainingCtx.testerName, trainingCtx.scenario, call.state]);
+
+  // Show feedback modal when call ends during training
+  useEffect(() => {
+    if (prevCallState.current === "active" && call.state === "ended" && training.active && trainingCtx.scenario) {
+      setShowFeedback(true);
+    }
+    prevCallState.current = call.state;
+  }, [call.state, training.active, trainingCtx.scenario]);
+
+  const handleScenarioSelect = async (scenario) => {
+    setShowScenarioPicker(false);
+    await trainingCtx.startSession(scenario);
+  };
+
+  const handleFeedbackSubmit = async ({ rating, feedbackText }) => {
+    const durationMs = call.endedAt && call.startedAt ? call.endedAt - call.startedAt : null;
+    await trainingCtx.finishSession({ rating, feedbackText, durationMs });
+    setShowFeedback(false);
+  };
+
+  const handleFeedbackSkip = () => {
+    trainingCtx.reset();
+    setShowFeedback(false);
+  };
 
   if (isMobile) return <MobileLayout />;
 
@@ -3402,6 +3440,20 @@ export default function MacOSDesktopMockup() {
           style={{ width: 80, accentColor: T.teal }} />
         <span style={{ fontFamily: T.mono, fontSize: 10, color: T.teal }}>{Math.round(opacity * 100)}%</span>
       </div>
+
+      {/* Training flow modals */}
+      {training.active && <TesterNameGate />}
+      {showScenarioPicker && training.active && trainingCtx.testerName && (
+        <ScenarioPicker onSelect={handleScenarioSelect} />
+      )}
+      {showFeedback && (
+        <FeedbackModal
+          scenario={trainingCtx.scenario}
+          durationMs={call.endedAt && call.startedAt ? call.endedAt - call.startedAt : null}
+          onSubmit={handleFeedbackSubmit}
+          onSkip={handleFeedbackSkip}
+        />
+      )}
     </div>
   );
 }
