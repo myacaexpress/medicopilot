@@ -62,6 +62,7 @@ export function useLiveAudio({ url, enabled }) {
     analyser: mic.analyser,
     transcripts: socket.transcripts,
     suggestions: socket.suggestions,
+    isAiThinking: socket.isAiThinking,
     autoPecl: socket.autoPecl,
     setLeadContext: socket.setLeadContext,
     requestSuggestion: socket.requestSuggestion,

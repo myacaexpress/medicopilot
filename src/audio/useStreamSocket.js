@@ -13,7 +13,7 @@
  * static demo lines from src/data/transcript.js.
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { StreamSocket } from "./streamSocket.js";
 
 /**
@@ -140,6 +140,30 @@ export function useStreamSocket({ url, enabled = true }) {
     };
   }, [url, enabled]);
 
+  // Auto-expire stuck "streaming" suggestions after 30s
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setSuggestions((prev) => {
+        const now = Date.now();
+        let changed = false;
+        const next = prev.map((s) => {
+          if (s.status === "streaming" && now - s.updatedAt > 30_000) {
+            changed = true;
+            return { ...s, status: "error", errorMessage: "Suggestion timed out", updatedAt: now };
+          }
+          return s;
+        });
+        return changed ? next : prev;
+      });
+    }, 5_000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const isAiThinking = useMemo(
+    () => suggestions.some((s) => s.status === "streaming"),
+    [suggestions]
+  );
+
   const startAudio = useCallback(() => socketRef.current?.startAudio(), []);
   const stopAudio = useCallback(() => socketRef.current?.stopAudio(), []);
   const sendFrame = useCallback(
@@ -168,6 +192,7 @@ export function useStreamSocket({ url, enabled = true }) {
     transcripts,
     lastError,
     suggestions,
+    isAiThinking,
     autoPecl,
     startAudio,
     stopAudio,

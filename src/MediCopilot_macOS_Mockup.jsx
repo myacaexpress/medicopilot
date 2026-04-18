@@ -2049,10 +2049,11 @@ function MobileLayout() {
             <Send size={16} color={T.white} />
           </button>
         </div>
-        <button onClick={handleAskAI} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 12, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
-          <Zap size={16} color={T.white} />
-          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 13, color: T.white }}>Ask AI</span>
+        <button onClick={handleAskAI} disabled={liveAudio.isAiThinking} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", background: liveAudio.isAiThinking ? "rgba(255,255,255,0.08)" : `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 12, cursor: liveAudio.isAiThinking ? "wait" : "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.3)", opacity: liveAudio.isAiThinking ? 0.7 : 1, transition: "opacity 0.2s" }}>
+          <Zap size={16} color={T.white} style={liveAudio.isAiThinking ? { animation: "askAiPulse 1s ease-in-out infinite" } : {}} />
+          <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 13, color: T.white }}>{liveAudio.isAiThinking ? "Thinking..." : "Ask AI"}</span>
         </button>
+        {liveAudio.isAiThinking && <style>{`@keyframes askAiPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }`}</style>}
       </div>
     </div>
   );
@@ -2816,10 +2817,10 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           <button style={{ background: "none", border: "none", cursor: "pointer", padding: "8px 4px" }}><Mic size={15} color="rgba(255,255,255,0.2)" /></button>
           <button onClick={handleAskAI} style={{ background: T.teal, border: "none", borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}><Send size={14} color={T.white} /></button>
         </div>
-        <button onClick={handleAskAI} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 16px", background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 12, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
+        <button onClick={handleAskAI} disabled={liveAudio.isAiThinking} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 16px", background: liveAudio.isAiThinking ? "rgba(255,255,255,0.08)" : `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 12, cursor: liveAudio.isAiThinking ? "wait" : "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.2)", opacity: liveAudio.isAiThinking ? 0.7 : 1, transition: "opacity 0.2s" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <Zap size={14} color={T.white} />
-            <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: T.white }}>Ask AI</span>
+            <Zap size={14} color={T.white} style={liveAudio.isAiThinking ? { animation: "askAiPulse 1s ease-in-out infinite" } : {}} />
+            <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: T.white }}>{liveAudio.isAiThinking ? "Thinking..." : "Ask AI"}</span>
           </div>
           <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.45)", letterSpacing: "0.02em" }}>⌘ Enter</span>
         </button>
@@ -2913,9 +2914,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
               style={{ flex: 1, background: "none", border: "none", outline: "none", fontFamily: T.body, fontSize: scaledFont(12), color: T.white, padding: "7px 0" }} />
             <button onClick={handleAskAI} style={{ background: T.teal, border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer" }}><Send size={12} color={T.white} /></button>
           </div>
-          <button onClick={handleAskAI} style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 12px", background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
-            <Zap size={13} color={T.white} />
-            <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: scaledFont(11), color: T.white }}>Ask AI</span>
+          <button onClick={handleAskAI} disabled={liveAudio.isAiThinking} style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 12px", background: liveAudio.isAiThinking ? "rgba(255,255,255,0.08)" : `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 10, cursor: liveAudio.isAiThinking ? "wait" : "pointer", whiteSpace: "nowrap", opacity: liveAudio.isAiThinking ? 0.7 : 1 }}>
+            <Zap size={13} color={T.white} style={liveAudio.isAiThinking ? { animation: "askAiPulse 1s ease-in-out infinite" } : {}} />
+            <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: scaledFont(11), color: T.white }}>{liveAudio.isAiThinking ? "Thinking..." : "Ask AI"}</span>
           </button>
         </div>
 
