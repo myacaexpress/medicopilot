@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Heart, Coins, Sprout, Shield, CheckCircle, Circle, AlertTriangle, Send, ChevronRight, Eye, EyeOff, Maximize2, Minimize2, Phone, User, Bot, Mic, MicOff, Monitor, GripVertical, Zap, Volume2, GripHorizontal, Menu, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Heart, Coins, Sprout, Shield, CheckCircle, Circle, AlertTriangle, Send, ChevronRight, Eye, EyeOff, Maximize2, Minimize2, Phone, User, Bot, Mic, MicOff, Monitor, GripVertical, Zap, Volume2, GripHorizontal, Menu, X, ChevronDown, ChevronUp, Flag, MessageSquare, Clock } from "lucide-react";
 import {
   MOCK_LEADS,
   RECENT_LEADS,
@@ -1785,6 +1785,15 @@ function MobileLayout() {
   }, [training, liveAudio]);
   const mobilePtt = usePushToTalk({ enabled: training.active && callActive, onDown: mobilePttDown, onUp: mobilePttUp });
 
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    if (call.state === "idle" || !call.startedAt) { setElapsedMs(0); return undefined; }
+    if (call.state === "ended" && call.endedAt) { setElapsedMs(call.endedAt - call.startedAt); return undefined; }
+    setElapsedMs(Date.now() - call.startedAt);
+    const id = setInterval(() => { setElapsedMs(Date.now() - call.startedAt); }, 30_000);
+    return () => clearInterval(id);
+  }, [call.state, call.startedAt, call.endedAt]);
+
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
   const renderedTranscript = usingLive
@@ -2226,7 +2235,135 @@ function MobileLayout() {
         </div>
       )}
 
+      {/* ─── Mobile Training Notes FAB + Sheet ─── */}
+      {training.active && (callActive || callEnded) && <MobileTrainingNotes elapsedMs={elapsedMs} />}
     </div>
+  );
+}
+
+// ─── Training Notes — Mobile (FAB + slide-up sheet) ───
+function MobileTrainingNotes({ elapsedMs }) {
+  const [trainingFlags, setTrainingFlags] = useState([]);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [noteInput, setNoteInput] = useState("");
+
+  const fmtTime = (ms) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
+  };
+
+  const handleAddFlag = useCallback(() => {
+    const text = noteInput.trim() || `Flag at ${fmtTime(elapsedMs)}`;
+    setTrainingFlags(prev => [...prev, { timestamp: elapsedMs, note: text, createdAt: Date.now() }]);
+    setNoteInput("");
+  }, [noteInput, elapsedMs]);
+
+  const handleRemoveFlag = useCallback((i) => {
+    setTrainingFlags(prev => prev.filter((_, idx) => idx !== i));
+  }, []);
+
+  return (
+    <>
+      {/* FAB */}
+      <button
+        data-testid="training-notes-fab"
+        onClick={() => setSheetOpen(!sheetOpen)}
+        style={{
+          position: "fixed", bottom: 80, right: 16, zIndex: 300,
+          display: "flex", alignItems: "center", gap: 6,
+          padding: "12px 18px", borderRadius: 28, border: "none", cursor: "pointer",
+          background: TRAINING_THEME.primary,
+          boxShadow: `0 4px 16px rgba(255,138,61,0.4)`,
+          fontFamily: T_NORMAL.display, fontSize: 12, fontWeight: 700, color: "#fff",
+        }}
+      >
+        <Flag size={16} />
+        Flag ({trainingFlags.length})
+      </button>
+
+      {/* Slide-up sheet */}
+      {sheetOpen && (
+        <div style={{
+          position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 400,
+          maxHeight: "60vh", display: "flex", flexDirection: "column",
+          background: "rgba(20,15,30,0.98)", borderRadius: "20px 20px 0 0",
+          border: `1px solid ${TRAINING_THEME.primary}30`,
+          boxShadow: "0 -8px 32px rgba(0,0,0,0.5)",
+        }}>
+          {/* Handle + header */}
+          <div style={{ padding: "12px 20px 0", flexShrink: 0 }}>
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.15)", margin: "0 auto 12px" }} />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <span style={{ fontFamily: T_NORMAL.display, fontSize: 14, fontWeight: 700, color: TRAINING_THEME.primary }}>
+                Training Notes
+              </span>
+              <button onClick={() => setSheetOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+                <X size={18} color="rgba(255,255,255,0.4)" />
+              </button>
+            </div>
+          </div>
+
+          {/* Quick flag button */}
+          <div style={{ padding: "0 20px 12px", flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <input
+                data-testid="mobile-training-note-input"
+                placeholder="What happened?"
+                value={noteInput}
+                onChange={e => setNoteInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAddFlag(); } }}
+                style={{
+                  flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 10, padding: "10px 12px", color: "#fff",
+                  fontFamily: T_NORMAL.body, fontSize: 14, outline: "none",
+                }}
+              />
+            </div>
+            <button
+              data-testid="mobile-training-flag-btn"
+              onClick={handleAddFlag}
+              style={{
+                width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer",
+                background: TRAINING_THEME.primary, fontFamily: T_NORMAL.display,
+                fontSize: 15, fontWeight: 700, color: "#fff",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}
+            >
+              <Flag size={18} /> Flag This Moment
+            </button>
+          </div>
+
+          {/* Flag list */}
+          {trainingFlags.length > 0 && (
+            <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 20px" }}>
+              {trainingFlags.map((f, i) => (
+                <div key={f.createdAt} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "10px 0",
+                  borderBottom: i < trainingFlags.length - 1 ? "1px solid rgba(255,255,255,0.06)" : "none",
+                }}>
+                  <span style={{
+                    fontFamily: T_NORMAL.mono, fontSize: 11, fontWeight: 700,
+                    color: TRAINING_THEME.primary, background: "rgba(255,138,61,0.12)",
+                    padding: "3px 8px", borderRadius: 6, flexShrink: 0,
+                  }}>
+                    {fmtTime(f.timestamp)}
+                  </span>
+                  <span style={{ flex: 1, fontFamily: T_NORMAL.body, fontSize: 13, color: "rgba(255,255,255,0.7)", lineHeight: 1.4 }}>
+                    {f.note}
+                  </span>
+                  <button onClick={() => handleRemoveFlag(i)} style={{
+                    background: "none", border: "none", cursor: "pointer", padding: 4,
+                    color: "rgba(255,255,255,0.25)", flexShrink: 0,
+                  }}>
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -3025,7 +3162,198 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           </svg>
         </div>
       </div>
+      {/* ─── Training Notes (draggable flag panel) ─── */}
+      {training.active && (callActive || callEnded) && (() => {
+        return <TrainingNotesDesktop elapsedMs={elapsedMs} />;
+      })()}
     </>
+  );
+}
+
+// ─── Training Notes — Desktop (draggable) ───
+function TrainingNotesDesktop({ elapsedMs }) {
+  const [trainingFlags, setTrainingFlags] = useState([]);
+  const [minimized, setMinimized] = useState(false);
+  const [noteInput, setNoteInput] = useState("");
+  const [editIdx, setEditIdx] = useState(-1);
+  const [editText, setEditText] = useState("");
+  const noteRef = useRef(null);
+  const drag = useDraggable(
+    typeof window !== "undefined" ? window.innerWidth - 340 : 1100,
+    80,
+  );
+
+  const fmtTime = (ms) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
+  };
+
+  const handleAddFlag = useCallback(() => {
+    const text = noteInput.trim();
+    if (!text) return;
+    setTrainingFlags(prev => [...prev, { timestamp: elapsedMs, note: text, createdAt: Date.now() }]);
+    setNoteInput("");
+    noteRef.current?.focus();
+  }, [noteInput, elapsedMs]);
+
+  const handleRemoveFlag = useCallback((i) => {
+    setTrainingFlags(prev => prev.filter((_, idx) => idx !== i));
+  }, []);
+
+  const handleUpdateFlagNote = useCallback((i, text) => {
+    setTrainingFlags(prev => prev.map((f, idx) => idx === i ? { ...f, note: text } : f));
+    setEditIdx(-1);
+  }, []);
+
+  if (minimized) {
+    return (
+      <div
+        data-testid="training-notes-minimized"
+        onClick={() => setMinimized(false)}
+        style={{
+          position: "fixed", top: drag.pos.y, left: drag.pos.x, zIndex: 200,
+          display: "flex", alignItems: "center", gap: 6,
+          padding: "6px 14px", borderRadius: 20, cursor: "pointer",
+          background: "rgba(255,138,61,0.15)", border: `1px solid ${TRAINING_THEME.primary}40`,
+          boxShadow: `0 2px 12px rgba(255,138,61,0.2)`,
+        }}
+      >
+        <Flag size={12} color={TRAINING_THEME.primary} />
+        <span style={{ fontFamily: T_NORMAL.display, fontSize: 11, fontWeight: 700, color: TRAINING_THEME.primary }}>
+          Notes ({trainingFlags.length})
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-testid="training-notes-panel"
+      onMouseDown={drag.onMouseDown}
+      style={{
+        position: "fixed", top: drag.pos.y, left: drag.pos.x, width: 300, zIndex: 200,
+        background: "rgba(20,15,30,0.96)", borderRadius: 14,
+        border: `1px solid ${TRAINING_THEME.primary}30`,
+        boxShadow: `0 8px 32px rgba(0,0,0,0.4), 0 0 16px rgba(255,138,61,0.08)`,
+        cursor: "grab", userSelect: "none",
+        maxHeight: "calc(100vh - 100px)", display: "flex", flexDirection: "column",
+      }}
+    >
+      {/* Header */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
+        borderBottom: `1px solid ${TRAINING_THEME.primary}20`, flexShrink: 0,
+      }}>
+        <GripVertical size={14} color="rgba(255,255,255,0.25)" />
+        <Flag size={14} color={TRAINING_THEME.primary} />
+        <span style={{ fontFamily: T_NORMAL.display, fontSize: 12, fontWeight: 700, color: TRAINING_THEME.primary }}>
+          Training Notes
+        </span>
+        {trainingFlags.length > 0 && (
+          <span style={{
+            fontFamily: T_NORMAL.mono, fontSize: 10, fontWeight: 700,
+            background: TRAINING_THEME.primary, color: "#fff",
+            borderRadius: 10, padding: "1px 7px", minWidth: 18, textAlign: "center",
+          }}>
+            {trainingFlags.length}
+          </span>
+        )}
+        <div style={{ flex: 1 }} />
+        <button data-no-drag="true" onClick={() => setMinimized(true)} style={{
+          background: "none", border: "none", cursor: "pointer", padding: 2,
+          color: "rgba(255,255,255,0.35)",
+        }}>
+          <Minimize2 size={13} />
+        </button>
+      </div>
+
+      {/* Input */}
+      <div data-no-drag="true" style={{
+        display: "flex", gap: 6, padding: "10px 14px", flexShrink: 0, cursor: "default",
+      }}>
+        <input
+          ref={noteRef}
+          data-testid="training-note-input"
+          placeholder="Flag this moment…"
+          value={noteInput}
+          onChange={e => setNoteInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAddFlag(); } }}
+          style={{
+            flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 8, padding: "7px 10px", color: "#fff",
+            fontFamily: T_NORMAL.body, fontSize: 12, outline: "none",
+          }}
+        />
+        <button
+          data-testid="training-flag-btn"
+          onClick={handleAddFlag}
+          style={{
+            background: TRAINING_THEME.primary, border: "none", borderRadius: 8,
+            padding: "7px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
+            fontFamily: T_NORMAL.display, fontSize: 11, fontWeight: 700, color: "#fff",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <Flag size={12} /> Flag
+        </button>
+      </div>
+
+      {/* Flag list */}
+      {trainingFlags.length > 0 && (
+        <div data-no-drag="true" style={{
+          flex: 1, overflowY: "auto", padding: "0 14px 12px", cursor: "default",
+        }}>
+          {trainingFlags.map((f, i) => (
+            <div key={f.createdAt} style={{
+              display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0",
+              borderBottom: i < trainingFlags.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+            }}>
+              <span style={{
+                fontFamily: T_NORMAL.mono, fontSize: 10, fontWeight: 700,
+                color: TRAINING_THEME.primary, background: "rgba(255,138,61,0.12)",
+                padding: "2px 6px", borderRadius: 4, flexShrink: 0, marginTop: 1,
+              }}>
+                {fmtTime(f.timestamp)}
+              </span>
+              {editIdx === i ? (
+                <input
+                  autoFocus
+                  value={editText}
+                  onChange={e => setEditText(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") handleUpdateFlagNote(i, editText); if (e.key === "Escape") setEditIdx(-1); }}
+                  onBlur={() => handleUpdateFlagNote(i, editText)}
+                  style={{
+                    flex: 1, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)",
+                    borderRadius: 4, padding: "2px 6px", color: "#fff",
+                    fontFamily: T_NORMAL.body, fontSize: 11, outline: "none",
+                  }}
+                />
+              ) : (
+                <span
+                  onClick={() => { setEditIdx(i); setEditText(f.note); }}
+                  style={{
+                    flex: 1, fontFamily: T_NORMAL.body, fontSize: 11,
+                    color: "rgba(255,255,255,0.7)", cursor: "text", lineHeight: 1.4,
+                  }}
+                >
+                  {f.note}
+                </span>
+              )}
+              <button
+                data-testid={`training-flag-remove-${i}`}
+                onClick={() => handleRemoveFlag(i)}
+                style={{
+                  background: "none", border: "none", cursor: "pointer", padding: 2,
+                  color: "rgba(255,255,255,0.25)", flexShrink: 0,
+                }}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
