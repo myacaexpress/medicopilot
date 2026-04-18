@@ -88,13 +88,18 @@ export default async function streamRoutes(app) {
     let speakerLocked = false;
     let trainingMode = false;
     let pttSpeaking = false;
+    /** @type {number|null} Timestamp when PTT was last released (true→false). */
+    let pttReleasedAt = null;
+    const pttTailMs = app.env?.pttTailMs ?? 1500;
     /** @type {number|null} DB session ID — only set in training mode. */
     let trainingSessionId = null;
     let sessionStartedAt = null;
 
     const mapSpeaker = (dgSpeaker) => {
       if (trainingMode) {
-        return pttSpeaking ? "agent" : "client";
+        if (pttSpeaking) return "agent";
+        if (pttReleasedAt && (Date.now() - pttReleasedAt) < pttTailMs) return "agent";
+        return "client";
       }
       if (!speakerLocked) {
         agentLabel = dgSpeaker;
@@ -359,10 +364,15 @@ export default async function streamRoutes(app) {
             log.info({ trainingSessionId }, "stream: training session ID set");
           }
           return;
-        case "ptt_state":
+        case "ptt_state": {
+          const wasSpeaking = pttSpeaking;
           pttSpeaking = !!msg.speaking;
-          log.debug({ pttSpeaking }, "stream: ptt state changed");
+          if (wasSpeaking && !pttSpeaking) {
+            pttReleasedAt = Date.now();
+          }
+          log.debug({ pttSpeaking, pttReleasedAt }, "stream: ptt state changed");
           return;
+        }
         case "bye":
           log.info("stream: client sent bye");
           stopDeepgram("client-bye");

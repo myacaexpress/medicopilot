@@ -265,8 +265,9 @@ test("client disconnect closes Deepgram session", async () => {
 
 test("training mode: PTT overrides first-speaker heuristic", async () => {
   const stub = makeDeepgramStub();
+  // Use a short tail window so we can test the "after tail" case quickly
   const app = await build(
-    { nodeEnv: "test", logLevel: "fatal", deepgramApiKey: "test-key" },
+    { nodeEnv: "test", logLevel: "fatal", deepgramApiKey: "test-key", pttTailMs: 100 },
     { deepgramFactory: stub.factory }
   );
   await app.listen({ port: 0, host: "127.0.0.1" });
@@ -289,7 +290,7 @@ test("training mode: PTT overrides first-speaker heuristic", async () => {
     // PTT not held → should be "client" regardless of Deepgram speaker label
     onUtt({ text: "Hello from the client.", isFinal: true, speaker: 0, ts: 1, words: [] });
     const u1 = await nextMessage();
-    assert.equal(u1.speaker, "client", "PTT released → must be client");
+    assert.equal(u1.speaker, "client", "PTT never held → must be client");
 
     // Hold PTT → should be "agent" regardless of Deepgram speaker label
     ws.send(JSON.stringify({ type: "ptt_state", speaking: true }));
@@ -298,26 +299,32 @@ test("training mode: PTT overrides first-speaker heuristic", async () => {
     const u2 = await nextMessage();
     assert.equal(u2.speaker, "agent", "PTT held → must be agent");
 
-    // Same Deepgram speaker (0) but PTT released → back to "client"
+    // PTT released → within tail window, still "agent"
     ws.send(JSON.stringify({ type: "ptt_state", speaking: false }));
     await new Promise((r) => setTimeout(r, 20));
-    onUtt({ text: "Client again.", isFinal: true, speaker: 0, ts: 3, words: [] });
+    onUtt({ text: "Late agent utterance.", isFinal: true, speaker: 0, ts: 3, words: [] });
     const u3 = await nextMessage();
-    assert.equal(u3.speaker, "client", "PTT released again → must be client");
+    assert.equal(u3.speaker, "agent", "PTT just released, within tail window → agent");
+
+    // Wait for tail window to expire → now "client"
+    await new Promise((r) => setTimeout(r, 150));
+    onUtt({ text: "Client again.", isFinal: true, speaker: 0, ts: 4, words: [] });
+    const u4 = await nextMessage();
+    assert.equal(u4.speaker, "client", "after tail window expired → client");
 
     // Different Deepgram speaker (1) with PTT held → still "agent" (DG label ignored)
     ws.send(JSON.stringify({ type: "ptt_state", speaking: true }));
     await new Promise((r) => setTimeout(r, 20));
-    onUtt({ text: "Agent on speaker 1.", isFinal: true, speaker: 1, ts: 4, words: [] });
-    const u4 = await nextMessage();
-    assert.equal(u4.speaker, "agent", "PTT held, different DG speaker → must be agent");
+    onUtt({ text: "Agent on speaker 1.", isFinal: true, speaker: 1, ts: 5, words: [] });
+    const u5 = await nextMessage();
+    assert.equal(u5.speaker, "agent", "PTT held, different DG speaker → must be agent");
 
     // Deepgram speaker label should NOT matter at all in training mode
     ws.send(JSON.stringify({ type: "ptt_state", speaking: false }));
-    await new Promise((r) => setTimeout(r, 20));
-    onUtt({ text: "Client on speaker 1.", isFinal: true, speaker: 1, ts: 5, words: [] });
-    const u5 = await nextMessage();
-    assert.equal(u5.speaker, "client", "PTT released, DG speaker 1 → must be client");
+    await new Promise((r) => setTimeout(r, 150));
+    onUtt({ text: "Client on speaker 1.", isFinal: true, speaker: 1, ts: 6, words: [] });
+    const u6 = await nextMessage();
+    assert.equal(u6.speaker, "client", "PTT released + tail expired, DG speaker 1 → must be client");
   } finally {
     ws.close();
     await app.close();
@@ -327,7 +334,7 @@ test("training mode: PTT overrides first-speaker heuristic", async () => {
 test("training mode: first-speaker heuristic does not lock", async () => {
   const stub = makeDeepgramStub();
   const app = await build(
-    { nodeEnv: "test", logLevel: "fatal", deepgramApiKey: "test-key" },
+    { nodeEnv: "test", logLevel: "fatal", deepgramApiKey: "test-key", pttTailMs: 100 },
     { deepgramFactory: stub.factory }
   );
   await app.listen({ port: 0, host: "127.0.0.1" });
@@ -378,6 +385,52 @@ test("training mode: first-speaker heuristic does not lock", async () => {
     onUtt({ text: "Post-training.", isFinal: true, speaker: 1, ts: 5, words: [] });
     const u5 = await nextMessage();
     assert.equal(u5.speaker, "agent", "after training off, first speaker re-locks as agent");
+  } finally {
+    ws.close();
+    await app.close();
+  }
+});
+
+test("training mode: PTT tail window labels late utterances as agent", async () => {
+  const stub = makeDeepgramStub();
+  const app = await build(
+    { nodeEnv: "test", logLevel: "fatal", deepgramApiKey: "test-key", pttTailMs: 1500 },
+    { deepgramFactory: stub.factory }
+  );
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const { port } = app.server.address();
+
+  const { ws, opened, nextMessage } = connect(`ws://127.0.0.1:${port}/stream`);
+  try {
+    await opened;
+    await nextMessage(); // hello
+
+    ws.send(JSON.stringify({ type: "set_training_mode", enabled: true }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    ws.send(JSON.stringify({ type: "start" }));
+    await nextMessage(); // ready
+
+    const onUtt = stub.calls.onUtteranceRefs[0];
+
+    // Hold PTT, speak, then release
+    ws.send(JSON.stringify({ type: "ptt_state", speaking: true }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    ws.send(JSON.stringify({ type: "ptt_state", speaking: false }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Deepgram delivers the utterance 500ms after PTT release — within tail window
+    await new Promise((r) => setTimeout(r, 500));
+    onUtt({ text: "Late agent utterance.", isFinal: true, speaker: 0, ts: 1, words: [] });
+    const u1 = await nextMessage();
+    assert.equal(u1.speaker, "agent", "utterance within tail window after PTT release → agent");
+
+    // Wait for tail window to expire, then deliver another utterance
+    await new Promise((r) => setTimeout(r, 1600));
+    onUtt({ text: "Now truly client.", isFinal: true, speaker: 0, ts: 2, words: [] });
+    const u2 = await nextMessage();
+    assert.equal(u2.speaker, "client", "utterance after tail window expired → client");
   } finally {
     ws.close();
     await app.close();

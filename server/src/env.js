@@ -25,6 +25,7 @@ const required = [];
  *   suggestionWindowMs: number,
  *   databaseUrl: string|null,
  *   trainingAdminKey: string|null,
+ *   pttTailMs: number,
  * }} Env */
 
 /** @returns {Env} */
@@ -47,6 +48,7 @@ export function loadEnv() {
     suggestionWindowMs: Number(process.env.SUGGESTION_WINDOW_MS) || 120_000,
     databaseUrl: process.env.DATABASE_URL || null,
     trainingAdminKey: process.env.TRAINING_ADMIN_KEY || null,
+    pttTailMs: Number(process.env.PTT_TAIL_MS) || 1500,
   };
 
   const missing = required.filter((k) => !process.env[k]);
