@@ -20,15 +20,15 @@ export function TrainingProvider({ children }) {
   }, []);
 
   const startSession = useCallback(async (scenarioObj) => {
-    setScenario(scenarioObj);
+    setScenario(scenarioObj || null);
     setFlags([]);
     try {
-      const s = await createSession(scenarioObj.id, testerName);
+      const s = await createSession(scenarioObj?.id || null, testerName);
       setSession(s);
       sessionRef.current = s;
       return s;
     } catch (err) {
-      const local = { id: `local_${Date.now()}`, scenario_id: scenarioObj.id, tester_name: testerName };
+      const local = { id: `local_${Date.now()}`, scenario_id: scenarioObj?.id || null, tester_name: testerName };
       setSession(local);
       sessionRef.current = local;
       return local;

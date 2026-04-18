@@ -129,7 +129,7 @@ function CopyMarkdownButton({ detail, timeline }) {
 
   const buildMarkdown = () => {
     const lines = [
-      `# Training Session — ${detail.scenario_title}`,
+      `# Training Session — ${detail.scenario_title || "Free Practice"}`,
       `- Tester: ${detail.tester_name}`,
       `- Date: ${fmtDate(detail.started_at)}`,
       `- Duration: ${fmtDuration(detail.duration_ms)}`,
@@ -240,7 +240,7 @@ function SessionsTab({ adminKey }) {
             border: "1px solid rgba(255,255,255,0.08)",
           }}>
             <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
-              {detail.scenario_title}
+              {detail.scenario_title || "Free Practice"}
             </div>
             <div style={{ fontFamily: "'Lora', serif", fontSize: 12, color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>
               Tester: {detail.tester_name}<br/>
@@ -318,7 +318,7 @@ function SessionsTab({ adminKey }) {
             >
               <div>
                 <span style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 13, fontWeight: 600, color: "#fff" }}>
-                  {s.scenario_title || s.scenario_id}
+                  {s.scenario_title || s.scenario_id || "Free Practice"}
                 </span>
                 <span style={{ fontFamily: "'Lora', serif", fontSize: 12, color: "rgba(255,255,255,0.4)", marginLeft: 8 }}>
                   {s.tester_name}

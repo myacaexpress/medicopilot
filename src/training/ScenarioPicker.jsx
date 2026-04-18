@@ -86,6 +86,42 @@ function ScenarioCard({ scenario, onSelect }) {
   );
 }
 
+function FreePracticeCard({ onSelect }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onSelect}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        textAlign: "left", width: "100%", padding: 16, borderRadius: 12,
+        border: `1px solid ${hover ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"}`,
+        background: hover ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.03)",
+        cursor: "pointer", transition: "all 0.2s",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 16 }}>&#x1F3AF;</span>
+        <span style={{
+          fontFamily: "'Montserrat', sans-serif", fontSize: 14, fontWeight: 700, color: "#fff",
+        }}>
+          Free Practice
+        </span>
+        <span style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "rgba(255,255,255,0.35)",
+        }}>
+          no scenario
+        </span>
+      </div>
+      <div style={{
+        fontFamily: "'Lora', serif", fontSize: 12, color: "rgba(255,255,255,0.5)", lineHeight: 1.5,
+      }}>
+        Test the AI with no persona or compliance focus. Good for exploring how the AI responds to any Medicare scenario you invent.
+      </div>
+    </button>
+  );
+}
+
 export function ScenarioPicker({ onSelect }) {
   const { testerName } = useTraining();
   const [scenarios, setScenarios] = useState([]);
@@ -131,6 +167,11 @@ export function ScenarioPicker({ onSelect }) {
           }}>
             Hi {testerName} — pick a persona to practice with
           </div>
+        </div>
+
+        {/* Free Practice — always first, not grouped by difficulty */}
+        <div style={{ marginBottom: 24 }}>
+          <FreePracticeCard onSelect={() => onSelect(null)} />
         </div>
 
         {loading && (
