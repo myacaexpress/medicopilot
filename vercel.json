@@ -5,11 +5,7 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
   "devCommand": "npm run dev",
-  "git": {
-    "deploymentEnabled": {
-      "main": true
-    }
-  },
+  "git": {},
   "github": {
     "silent": true
   },

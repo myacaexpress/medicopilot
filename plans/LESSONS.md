@@ -29,3 +29,11 @@ fly deploy --remote-only -a medicopilot-myacaexpress
 The main-branch auto-deploy will overwrite this once the PR merges, so there's no cleanup needed.
 
 Alternative: use `npm run push-pr` which detects server/ changes and deploys automatically.
+
+### Vercel preview deploys must be enabled for all branches
+
+**Date:** 2026-04-18
+
+`vercel.json` had `git.deploymentEnabled: { "main": true }` which restricted preview deploys to the `main` branch only. Every other branch — including PR branches — got no Vercel preview. We spent multiple sessions debugging "phantom bugs" where the feature appeared broken, but we were actually looking at stale production code from `main`, not the branch code.
+
+**Fix:** Removed the `deploymentEnabled` restriction so Vercel previews all branches by default. The `git` block is now empty (`"git": {}`). If we ever need to exclude a branch, add it back as `"branchName": false`.
