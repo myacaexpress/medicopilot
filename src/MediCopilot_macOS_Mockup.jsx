@@ -1779,6 +1779,12 @@ function MobileLayout() {
     liveAudio.setTrainingMode(training.active);
   }, [training.active, liveAudio]);
 
+  const trainingCtxMobile = useTraining();
+  useEffect(() => {
+    const sid = trainingCtxMobile.session?.id;
+    if (sid && typeof sid === "number") liveAudio.setTrainingSession(sid);
+  }, [trainingCtxMobile.session, liveAudio]);
+
   const mobilePttDown = useCallback(() => {
     training.setPttHeld(true);
     liveAudio.setPttState(true);
@@ -2440,6 +2446,12 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   useEffect(() => {
     liveAudio.setTrainingMode(training.active);
   }, [training.active, liveAudio]);
+
+  const trainingCtxDesktop = useTraining();
+  useEffect(() => {
+    const sid = trainingCtxDesktop.session?.id;
+    if (sid && typeof sid === "number") liveAudio.setTrainingSession(sid);
+  }, [trainingCtxDesktop.session, liveAudio]);
 
   const pttDown = useCallback(() => {
     training.setPttHeld(true);

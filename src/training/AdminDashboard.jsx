@@ -16,6 +16,178 @@ function fmtDuration(ms) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function buildTimeline(detail) {
+  const events = [];
+  for (const t of detail.transcripts || []) {
+    events.push({ type: "transcript", speaker: t.speaker, text: t.text, ts: t.timestamp_ms });
+  }
+  for (const s of detail.ai_suggestions || []) {
+    events.push({
+      type: "suggestion",
+      sayThis: s.say_this,
+      callStage: s.call_stage,
+      triggerInfo: s.trigger_info,
+      followUps: s.follow_up_questions,
+      ts: s.timestamp_ms,
+    });
+  }
+  for (const f of detail.flags || []) {
+    events.push({ type: "flag", note: f.note || f.flag_type, ts: f.timestamp_ms });
+  }
+  events.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+  return events;
+}
+
+function TimelineEvent({ event }) {
+  const ts = fmtDuration(event.ts);
+  const mono = { fontFamily: "'JetBrains Mono', monospace" };
+  const serif = { fontFamily: "'Lora', serif" };
+
+  if (event.type === "transcript") {
+    const isAgent = event.speaker === "agent";
+    return (
+      <div style={{ display: "flex", gap: 8, marginBottom: 6, flexDirection: isAgent ? "row-reverse" : "row" }}>
+        <span style={{ ...mono, fontSize: 9, color: "rgba(255,255,255,0.25)", minWidth: 36, textAlign: "right", paddingTop: 6, flexShrink: 0 }}>
+          {ts}
+        </span>
+        <div style={{
+          maxWidth: "70%", padding: "6px 10px", borderRadius: 10,
+          background: isAgent ? "rgba(59,130,246,0.12)" : "rgba(255,255,255,0.06)",
+          border: isAgent ? "1px solid rgba(59,130,246,0.2)" : "1px solid rgba(255,255,255,0.08)",
+        }}>
+          <div style={{ ...mono, fontSize: 9, color: isAgent ? "rgba(59,130,246,0.7)" : "rgba(255,255,255,0.35)", marginBottom: 2 }}>
+            {isAgent ? "AGENT" : "CLIENT"}
+          </div>
+          <div style={{ ...serif, fontSize: 12, color: "rgba(255,255,255,0.75)", lineHeight: 1.5 }}>
+            {event.text}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (event.type === "suggestion") {
+    const kind = event.triggerInfo?.kind;
+    return (
+      <div style={{ display: "flex", gap: 8, marginBottom: 8, justifyContent: "center" }}>
+        <span style={{ ...mono, fontSize: 9, color: "rgba(255,255,255,0.25)", minWidth: 36, textAlign: "right", paddingTop: 8, flexShrink: 0 }}>
+          {ts}
+        </span>
+        <div style={{
+          maxWidth: "80%", padding: "8px 12px", borderRadius: 10,
+          background: "rgba(255,138,61,0.06)", border: `1px solid rgba(255,138,61,0.2)`,
+        }}>
+          <div style={{ ...mono, fontSize: 9, color: THEME.primary, marginBottom: 4, display: "flex", gap: 8 }}>
+            <span>AI SUGGESTION</span>
+            {event.callStage && <span style={{ color: "rgba(255,138,61,0.6)" }}>[stage: {event.callStage}]</span>}
+            {kind && <span style={{ color: "rgba(255,138,61,0.6)" }}>[{kind}]</span>}
+          </div>
+          {event.sayThis && (
+            <div style={{ ...serif, fontSize: 12, color: "rgba(255,255,255,0.8)", lineHeight: 1.5 }}>
+              &rarr; {event.sayThis}
+            </div>
+          )}
+          {Array.isArray(event.followUps) && event.followUps.length > 0 && (
+            <div style={{ marginTop: 4 }}>
+              {event.followUps.map((q, i) => (
+                <div key={i} style={{ ...serif, fontSize: 11, color: "rgba(255,255,255,0.5)", paddingLeft: 12 }}>
+                  &bull; {q}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (event.type === "flag") {
+    return (
+      <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center" }}>
+        <span style={{ ...mono, fontSize: 9, color: "rgba(255,255,255,0.25)", minWidth: 36, textAlign: "right", flexShrink: 0 }}>
+          {ts}
+        </span>
+        <div style={{
+          flex: 1, padding: "4px 10px", borderRadius: 6,
+          background: "rgba(244,124,110,0.08)", border: "1px solid rgba(244,124,110,0.2)",
+          display: "flex", gap: 6, alignItems: "center",
+        }}>
+          <span style={{ fontSize: 12 }}>&#x1F6A9;</span>
+          <span style={{ ...serif, fontSize: 12, color: "#F47C6E" }}>
+            {event.note}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function CopyMarkdownButton({ detail, timeline }) {
+  const [copied, setCopied] = useState(false);
+
+  const buildMarkdown = () => {
+    const lines = [
+      `# Training Session — ${detail.scenario_title}`,
+      `- Tester: ${detail.tester_name}`,
+      `- Date: ${fmtDate(detail.started_at)}`,
+      `- Duration: ${fmtDuration(detail.duration_ms)}`,
+      `- Rating: ${detail.rating || "—"}/5`,
+      detail.master_prompt_version ? `- Master prompt version: ${detail.master_prompt_version}` : null,
+      "",
+      "## Scenario",
+      detail.persona_name ? `**Persona:** ${detail.persona_name}` : null,
+      detail.situation ? `**Situation:** ${detail.situation}` : null,
+      detail.success_criteria?.length ? `**Success criteria:** ${detail.success_criteria.join("; ")}` : null,
+      "",
+      "## Timeline",
+      "",
+    ].filter((l) => l !== null);
+
+    for (const ev of timeline) {
+      const ts = fmtDuration(ev.ts);
+      if (ev.type === "transcript") {
+        lines.push(`[${ts}] ${ev.speaker === "agent" ? "AGENT" : "CLIENT"}: ${ev.text}`);
+      } else if (ev.type === "suggestion") {
+        const stage = ev.callStage ? ` [stage: ${ev.callStage}]` : "";
+        lines.push(`[${ts}] \u{1F916} AI SUGGESTION${stage}:`);
+        if (ev.sayThis) lines.push(`       Say this: "${ev.sayThis}"`);
+        if (Array.isArray(ev.followUps)) {
+          for (const q of ev.followUps) lines.push(`       \u2022 ${q}`);
+        }
+      } else if (ev.type === "flag") {
+        lines.push(`[${ts}] \u{1F6A9} FLAG: ${ev.note}`);
+      }
+    }
+
+    if (detail.feedback_text) {
+      lines.push("", "## Tester Feedback", detail.feedback_text);
+    }
+
+    return lines.join("\n");
+  };
+
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(buildMarkdown());
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      style={{
+        padding: "10px 16px", borderRadius: 8, width: "100%",
+        border: `1px solid ${THEME.primary}`, background: copied ? "rgba(255,138,61,0.15)" : "transparent",
+        color: THEME.primary, fontSize: 12, fontWeight: 600,
+        fontFamily: "'Montserrat', sans-serif", cursor: "pointer",
+        transition: "background 0.2s",
+      }}
+    >
+      {copied ? "Copied!" : "Copy as Markdown"}
+    </button>
+  );
+}
+
 function SessionsTab({ adminKey }) {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -36,41 +208,67 @@ function SessionsTab({ adminKey }) {
   };
 
   if (detail) {
+    const timeline = buildTimeline(detail);
     return (
-      <div>
-        <button onClick={() => setDetail(null)} style={{
-          background: "none", border: "none", color: THEME.primary, cursor: "pointer",
-          fontFamily: "'Montserrat', sans-serif", fontSize: 12, fontWeight: 600, marginBottom: 16,
-        }}>
-          &larr; Back to list
-        </button>
-        <div style={{
-          background: "rgba(255,255,255,0.03)", borderRadius: 12, padding: 20,
-          border: "1px solid rgba(255,255,255,0.08)",
-        }}>
-          <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
-            {detail.scenario_title}
+      <div style={{ display: "flex", gap: 20, height: "calc(100vh - 160px)" }}>
+        {/* Main timeline column */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <button onClick={() => setDetail(null)} style={{
+            background: "none", border: "none", color: THEME.primary, cursor: "pointer",
+            fontFamily: "'Montserrat', sans-serif", fontSize: 12, fontWeight: 600, marginBottom: 12,
+            alignSelf: "flex-start",
+          }}>
+            &larr; Back to list
+          </button>
+          <div style={{
+            flex: 1, overflowY: "auto", background: "rgba(255,255,255,0.02)",
+            borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)", padding: 16,
+          }}>
+            {timeline.length === 0 ? (
+              <div style={{ color: "rgba(255,255,255,0.3)", fontFamily: "'Lora', serif", fontSize: 13, textAlign: "center", padding: 40 }}>
+                No timeline events recorded for this session.
+              </div>
+            ) : timeline.map((ev, i) => (
+              <TimelineEvent key={i} event={ev} />
+            ))}
           </div>
-          <div style={{ fontFamily: "'Lora', serif", fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 16 }}>
-            Tester: {detail.tester_name} · {fmtDate(detail.started_at)} · Duration: {fmtDuration(detail.duration_ms)}
-            {detail.rating && ` · Rating: ${detail.rating}/5`}
-          </div>
-          {detail.situation && (
-            <div style={{ fontFamily: "'Lora', serif", fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 12 }}>
-              Scenario: {detail.situation}
+        </div>
+        {/* Sidebar */}
+        <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+          <div style={{
+            background: "rgba(255,255,255,0.03)", borderRadius: 12, padding: 16,
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}>
+            <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+              {detail.scenario_title}
             </div>
-          )}
-          {detail.feedback_text && (
+            <div style={{ fontFamily: "'Lora', serif", fontSize: 12, color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>
+              Tester: {detail.tester_name}<br/>
+              Date: {fmtDate(detail.started_at)}<br/>
+              Duration: {fmtDuration(detail.duration_ms)}<br/>
+              {detail.rating && <>Rating: {detail.rating}/5<br/></>}
+              {detail.master_prompt_version && <>Prompt: {detail.master_prompt_version}</>}
+            </div>
+          </div>
+          {detail.persona_name && (
             <div style={{
-              padding: 12, borderRadius: 8, background: "rgba(255,138,61,0.06)",
-              border: "1px solid rgba(255,138,61,0.1)",
-              fontFamily: "'Lora', serif", fontSize: 13, color: "rgba(255,255,255,0.7)", marginBottom: 16,
+              background: "rgba(255,255,255,0.03)", borderRadius: 12, padding: 16,
+              border: "1px solid rgba(255,255,255,0.08)",
             }}>
-              {detail.feedback_text}
+              <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.04em", marginBottom: 6 }}>
+                SCENARIO
+              </div>
+              <div style={{ fontFamily: "'Lora', serif", fontSize: 12, color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>
+                <strong style={{ color: "rgba(255,255,255,0.7)" }}>{detail.persona_name}</strong>
+                {detail.situation && <><br/>{detail.situation}</>}
+              </div>
             </div>
           )}
           {detail.success_criteria?.length > 0 && (
-            <div style={{ marginBottom: 16 }}>
+            <div style={{
+              background: "rgba(255,255,255,0.03)", borderRadius: 12, padding: 16,
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}>
               <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.04em", marginBottom: 6 }}>
                 SUCCESS CRITERIA
               </div>
@@ -79,50 +277,20 @@ function SessionsTab({ adminKey }) {
               </ul>
             </div>
           )}
-          {detail.flags?.length > 0 && (
-            <div>
+          {detail.feedback_text && (
+            <div style={{
+              background: "rgba(255,138,61,0.06)", borderRadius: 12, padding: 16,
+              border: "1px solid rgba(255,138,61,0.1)",
+            }}>
               <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.4)", letterSpacing: "0.04em", marginBottom: 6 }}>
-                FLAGS ({detail.flags.length})
+                TESTER FEEDBACK
               </div>
-              {detail.flags.map((f, i) => (
-                <div key={i} style={{
-                  padding: "6px 10px", marginBottom: 4, borderRadius: 6,
-                  background: "rgba(255,138,61,0.04)", border: "1px solid rgba(255,138,61,0.08)",
-                  display: "flex", gap: 8, alignItems: "center",
-                }}>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: THEME.primary }}>
-                    {fmtDuration(f.timestamp_ms)}
-                  </span>
-                  <span style={{ fontFamily: "'Lora', serif", fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
-                    {f.note || f.flag_type}
-                  </span>
-                </div>
-              ))}
+              <div style={{ fontFamily: "'Lora', serif", fontSize: 13, color: "rgba(255,255,255,0.7)" }}>
+                {detail.feedback_text}
+              </div>
             </div>
           )}
-          <button
-            onClick={() => {
-              const md = [
-                `## ${detail.scenario_title}`,
-                `**Tester:** ${detail.tester_name}  `,
-                `**Date:** ${fmtDate(detail.started_at)}  `,
-                `**Duration:** ${fmtDuration(detail.duration_ms)}  `,
-                `**Rating:** ${detail.rating || "—"}/5  `,
-                "",
-                detail.feedback_text ? `### Feedback\n${detail.feedback_text}\n` : "",
-                detail.flags?.length ? `### Flags\n${detail.flags.map(f => `- **${fmtDuration(f.timestamp_ms)}** ${f.note || f.flag_type}`).join("\n")}\n` : "",
-              ].filter(Boolean).join("\n");
-              navigator.clipboard.writeText(md);
-            }}
-            style={{
-              marginTop: 16, padding: "8px 16px", borderRadius: 8,
-              border: `1px solid ${THEME.primary}`, background: "transparent",
-              color: THEME.primary, fontSize: 12, fontWeight: 600,
-              fontFamily: "'Montserrat', sans-serif", cursor: "pointer",
-            }}
-          >
-            Copy as Markdown
-          </button>
+          <CopyMarkdownButton detail={detail} timeline={timeline} />
         </div>
       </div>
     );

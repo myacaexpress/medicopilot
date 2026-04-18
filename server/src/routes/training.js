@@ -193,11 +193,26 @@ export default async function trainingRoutes(app) {
     if (sessionRes.rows.length === 0) {
       return reply.code(404).send({ error: "Session not found" });
     }
-    const flagsRes = await query(
-      `SELECT * FROM training_flags WHERE session_id = $1 ORDER BY timestamp_ms`,
-      [id]
-    );
-    return { ...sessionRes.rows[0], flags: flagsRes.rows };
+    const [flagsRes, transcriptsRes, suggestionsRes] = await Promise.all([
+      query(
+        `SELECT * FROM training_flags WHERE session_id = $1 ORDER BY timestamp_ms`,
+        [id]
+      ),
+      query(
+        `SELECT speaker, text, timestamp_ms FROM training_transcripts WHERE session_id = $1 ORDER BY timestamp_ms`,
+        [id]
+      ),
+      query(
+        `SELECT say_this, trigger_info, call_stage, follow_up_questions, timestamp_ms FROM training_ai_suggestions WHERE session_id = $1 ORDER BY timestamp_ms`,
+        [id]
+      ),
+    ]);
+    return {
+      ...sessionRes.rows[0],
+      flags: flagsRes.rows,
+      transcripts: transcriptsRes.rows,
+      ai_suggestions: suggestionsRes.rows,
+    };
   });
 
   app.get("/api/training/admin/stats", { preHandler: checkAdmin }, async () => {

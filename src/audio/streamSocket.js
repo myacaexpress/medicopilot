@@ -186,6 +186,12 @@ export class StreamSocket extends EventTarget {
     }
   }
 
+  setTrainingSession(sessionId) {
+    if (this.state === "connected") {
+      this._safeSend(JSON.stringify({ type: "set_training_session", sessionId }));
+    }
+  }
+
   setTrainingScenario(scenarioId) {
     if (this.state === "connected") {
       this._safeSend(JSON.stringify({ type: "set_training_scenario", scenarioId }));

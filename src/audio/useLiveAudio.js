@@ -70,6 +70,7 @@ export function useLiveAudio({ url, enabled }) {
     clearSuggestions: socket.clearSuggestions,
     recalibrateSpeakers: socket.recalibrateSpeakers,
     setTrainingMode: socket.setTrainingMode,
+    setTrainingSession: socket.setTrainingSession,
     setPttState: socket.setPttState,
     setTrainingScenario: socket.setTrainingScenario,
   };
