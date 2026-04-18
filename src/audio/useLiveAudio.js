@@ -64,7 +64,11 @@ export function useLiveAudio({ url, enabled }) {
     suggestions: socket.suggestions,
     autoPecl: socket.autoPecl,
     setLeadContext: socket.setLeadContext,
+    requestSuggestion: socket.requestSuggestion,
     clearTranscripts: socket.clearTranscripts,
     clearSuggestions: socket.clearSuggestions,
+    recalibrateSpeakers: socket.recalibrateSpeakers,
+    setTrainingMode: socket.setTrainingMode,
+    setPttState: socket.setPttState,
   };
 }

@@ -12,6 +12,7 @@ import { loadEnv } from "./env.js";
 import { createLogger } from "./logger.js";
 import healthRoutes from "./routes/health.js";
 import streamRoutes from "./routes/stream.js";
+import { preflight } from "./preflight.js";
 
 /**
  * @param {Partial<import("./env.js").Env>} [envOverrides]
@@ -70,6 +71,7 @@ const isMain = import.meta.url === `file://${process.argv[1]}`;
 if (isMain) {
   const env = loadEnv();
   const app = await build();
+  await preflight(env, app.log);
   try {
     await app.listen({ port: env.port, host: env.host });
     app.log.info({ port: env.port, host: env.host }, "server: listening");

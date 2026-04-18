@@ -29,13 +29,17 @@ function makeDeepgramStub() {
  * instance so tests can fire engine events back through the socket.
  */
 function makeEngineStub() {
-  const calls = { instances: [], leadCalls: [], ingestCalls: [], disposed: 0 };
+  const calls = { instances: [], leadCalls: [], ingestCalls: [], requestCalls: 0, disposed: 0 };
   const factory = (deps) => {
     const inst = {
       deps,
       setLead: (lead) => calls.leadCalls.push(lead),
       ingestUtterance: (u) => {
         calls.ingestCalls.push(u);
+        return Promise.resolve();
+      },
+      requestSuggestion: () => {
+        calls.requestCalls += 1;
         return Promise.resolve();
       },
       dispose: () => {
@@ -282,6 +286,167 @@ test("engine integration: real engine emits PECL update for TPMO language", asyn
     assert.ok(types.includes("pecl_update"), `expected pecl_update, got ${types}`);
     const peclFrame = seen.find((s) => s.type === "pecl_update");
     assert.ok(peclFrame.items.includes("tpmo"));
+  } finally {
+    ws.close();
+    await app.close();
+  }
+});
+
+test("request_suggestion triggers engine.requestSuggestion", async () => {
+  const dg = makeDeepgramStub();
+  const eng = makeEngineStub();
+  const app = await build(
+    { nodeEnv: "test", logLevel: "fatal", deepgramApiKey: "test-key", anthropicApiKey: "test-key" },
+    {
+      deepgramFactory: dg.factory,
+      suggestionClientFactory: () => ({ messages: { stream: () => ({}) } }),
+      suggestionEngineFactory: eng.factory,
+    }
+  );
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const { port } = app.server.address();
+  const { ws, opened, nextMessage } = connect(`ws://127.0.0.1:${port}/stream`);
+  try {
+    await opened;
+    await nextMessage(); // hello
+    ws.send(JSON.stringify({ type: "request_suggestion" }));
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(eng.calls.requestCalls, 1);
+  } finally {
+    ws.close();
+    await app.close();
+  }
+});
+
+test("first utterance tagged as agent, second speaker tagged as client", async () => {
+  const dg = makeDeepgramStub();
+  const eng = makeEngineStub();
+  const app = await build(
+    { nodeEnv: "test", logLevel: "fatal", deepgramApiKey: "test-key", anthropicApiKey: "test-key" },
+    {
+      deepgramFactory: dg.factory,
+      suggestionClientFactory: () => ({ messages: { stream: () => ({}) } }),
+      suggestionEngineFactory: eng.factory,
+    }
+  );
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const { port } = app.server.address();
+  const { ws, opened, nextMessage } = connect(`ws://127.0.0.1:${port}/stream`);
+  try {
+    await opened;
+    await nextMessage(); // hello
+    ws.send(JSON.stringify({ type: "start" }));
+    await nextMessage(); // ready
+
+    const onUtt = dg.calls.onUtteranceRefs[0];
+
+    // First speaker (speaker 0) → agent
+    onUtt({ text: "Hi, this is Shawn.", isFinal: true, speaker: 0, ts: 1, words: [] });
+    const u1 = await nextMessage();
+    assert.equal(u1.speaker, "agent");
+
+    // Second speaker (speaker 1) → client
+    onUtt({ text: "Hello, yes.", isFinal: true, speaker: 1, ts: 2, words: [] });
+    const u2 = await nextMessage();
+    assert.equal(u2.speaker, "client");
+
+    // Same first speaker again → still agent
+    onUtt({ text: "Great, let me pull up your info.", isFinal: true, speaker: 0, ts: 3, words: [] });
+    const u3 = await nextMessage();
+    assert.equal(u3.speaker, "agent");
+
+    // Engine also got the mapped roles
+    assert.equal(eng.calls.ingestCalls[0].speaker, "agent");
+    assert.equal(eng.calls.ingestCalls[1].speaker, "client");
+  } finally {
+    ws.close();
+    await app.close();
+  }
+});
+
+test("recalibrate_speakers flips the mapping", async () => {
+  const dg = makeDeepgramStub();
+  const eng = makeEngineStub();
+  const app = await build(
+    { nodeEnv: "test", logLevel: "fatal", deepgramApiKey: "test-key", anthropicApiKey: "test-key" },
+    {
+      deepgramFactory: dg.factory,
+      suggestionClientFactory: () => ({ messages: { stream: () => ({}) } }),
+      suggestionEngineFactory: eng.factory,
+    }
+  );
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const { port } = app.server.address();
+  const { ws, opened, nextMessage } = connect(`ws://127.0.0.1:${port}/stream`);
+  try {
+    await opened;
+    await nextMessage(); // hello
+    ws.send(JSON.stringify({ type: "start" }));
+    await nextMessage(); // ready
+
+    const onUtt = dg.calls.onUtteranceRefs[0];
+
+    // Lock mapping: speaker 0 = agent
+    onUtt({ text: "Hello.", isFinal: true, speaker: 0, ts: 1, words: [] });
+    const u1 = await nextMessage();
+    assert.equal(u1.speaker, "agent");
+
+    // Flip mapping
+    ws.send(JSON.stringify({ type: "recalibrate_speakers" }));
+    const recal = await nextMessage();
+    assert.equal(recal.type, "speakers_recalibrated");
+
+    // Now speaker 0 should be client
+    onUtt({ text: "After flip.", isFinal: true, speaker: 0, ts: 2, words: [] });
+    const u2 = await nextMessage();
+    assert.equal(u2.speaker, "client");
+
+    // And speaker 1 should be agent
+    onUtt({ text: "I am the agent.", isFinal: true, speaker: 1, ts: 3, words: [] });
+    const u3 = await nextMessage();
+    assert.equal(u3.speaker, "agent");
+  } finally {
+    ws.close();
+    await app.close();
+  }
+});
+
+test("speaker mapping resets on new start", async () => {
+  const dg = makeDeepgramStub();
+  const eng = makeEngineStub();
+  const app = await build(
+    { nodeEnv: "test", logLevel: "fatal", deepgramApiKey: "test-key", anthropicApiKey: "test-key" },
+    {
+      deepgramFactory: dg.factory,
+      suggestionClientFactory: () => ({ messages: { stream: () => ({}) } }),
+      suggestionEngineFactory: eng.factory,
+    }
+  );
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const { port } = app.server.address();
+  const { ws, opened, nextMessage } = connect(`ws://127.0.0.1:${port}/stream`);
+  try {
+    await opened;
+    await nextMessage(); // hello
+    ws.send(JSON.stringify({ type: "start" }));
+    await nextMessage(); // ready
+
+    const onUtt1 = dg.calls.onUtteranceRefs[0];
+    // Lock mapping: speaker 0 = agent
+    onUtt1({ text: "Hello.", isFinal: true, speaker: 0, ts: 1, words: [] });
+    await nextMessage();
+
+    // Stop and start a new session
+    ws.send(JSON.stringify({ type: "stop" }));
+    await new Promise((r) => setTimeout(r, 20));
+    ws.send(JSON.stringify({ type: "start" }));
+    await nextMessage(); // ready
+
+    // Now speaker 1 speaks first → should be agent
+    const onUtt2 = dg.calls.onUtteranceRefs[1];
+    onUtt2({ text: "Second call.", isFinal: true, speaker: 1, ts: 10, words: [] });
+    const u = await nextMessage();
+    assert.equal(u.speaker, "agent", "new call should reset speaker mapping");
   } finally {
     ws.close();
     await app.close();

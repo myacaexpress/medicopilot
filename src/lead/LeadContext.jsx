@@ -244,6 +244,14 @@ export function LeadProvider({ children }) {
   const [callState, setCallState] = useState(/** @type {CallState} */ ("idle"));
   const [callStartedAt, setCallStartedAt] = useState(/** @type {number|null} */ (null));
   const [callEndedAt, setCallEndedAt] = useState(/** @type {number|null} */ (null));
+  const [trainingMode, setTrainingModeRaw] = useState(() => {
+    try { return sessionStorage.getItem("medicopilot_training") === "1"; } catch { return false; }
+  });
+  const setTrainingMode = useCallback((v) => {
+    setTrainingModeRaw(v);
+    try { sessionStorage.setItem("medicopilot_training", v ? "1" : "0"); } catch {}
+  }, []);
+  const [pttActive, setPttActive] = useState(false);
 
   const startCall = useCallback(() => {
     setCallStartedAt(Date.now());
@@ -254,6 +262,7 @@ export function LeadProvider({ children }) {
   const endCall = useCallback(() => {
     setCallEndedAt(Date.now());
     setCallState("ended");
+    setPttActive(false);
   }, []);
 
   // Transient UI state: which field is currently highlighted by a hover
@@ -303,6 +312,8 @@ export function LeadProvider({ children }) {
       highlightedField, highlightField,
       callState, callStartedAt, callEndedAt,
       startCall, endCall,
+      trainingMode, setTrainingMode,
+      pttActive, setPttActive,
     }}>
       {children}
     </LeadCtx.Provider>
@@ -337,6 +348,7 @@ export function useLead() {
   const {
     lead, dispatch, highlightedField, highlightField,
     callState, callStartedAt, callEndedAt, startCall, endCall,
+    trainingMode, setTrainingMode, pttActive, setPttActive,
   } = ctx;
 
   const capture = useCallback((newLead) => {
@@ -364,6 +376,12 @@ export function useLead() {
       endedAt: callEndedAt,
       start: startCall,
       end: endCall,
+    },
+    training: {
+      active: trainingMode,
+      setActive: setTrainingMode,
+      pttHeld: pttActive,
+      setPttHeld: setPttActive,
     },
     actions: { capture, updateField, clear, switchLead, highlightField },
   };

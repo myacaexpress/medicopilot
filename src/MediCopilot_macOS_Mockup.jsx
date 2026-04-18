@@ -22,14 +22,121 @@ import { useLiveAudio } from "./audio/index.js";
 
 const BACKEND_WSS_URL = import.meta.env.VITE_BACKEND_WSS_URL || null;
 
-const T = {
-  teal: "#007B7F", tealDark: "#004D50", tealLight: "#1A9EA2",
-  coral: "#F47C6E", coralDark: "#D45A48",
-  dusk: "#B0C4DE", white: "#fff",
+const BASE_FONTS = {
   display: "'Montserrat', sans-serif",
   body: "'Lora', Georgia, serif",
   mono: "'JetBrains Mono', monospace",
 };
+
+const T_NORMAL = {
+  teal: "#007B7F", tealDark: "#004D50", tealLight: "#1A9EA2",
+  tealRgb: "0,123,127", greenRgb: "52,199,123",
+  green: "#34C77B", greenLight: "#7be0a8", greenDark: "#013014",
+  coral: "#F47C6E", coralDark: "#D45A48",
+  dusk: "#B0C4DE", white: "#fff",
+  ...BASE_FONTS,
+};
+
+const T_TRAINING = {
+  teal: "#FF8A3D", tealDark: "#CC6B2E", tealLight: "#FFB077",
+  tealRgb: "255,138,61", greenRgb: "255,138,61",
+  green: "#FF8A3D", greenLight: "#FFB077", greenDark: "#4A2200",
+  coral: "#F47C6E", coralDark: "#D45A48",
+  dusk: "#B0C4DE", white: "#fff",
+  ...BASE_FONTS,
+};
+
+const T = T_NORMAL;
+
+function makeTheme(isTraining) {
+  return isTraining ? T_TRAINING : T_NORMAL;
+}
+
+function useTheme() {
+  try {
+    const { training } = useLead();
+    return training.active ? T_TRAINING : T_NORMAL;
+  } catch {
+    return T_NORMAL;
+  }
+}
+
+const TRAINING_THEME = {
+  primary: "#FF8A3D",
+  dark: "#CC6B2E",
+  light: "#FFB077",
+};
+
+function usePushToTalk({ enabled, onDown, onUp }) {
+  const [held, setHeld] = useState(false);
+  const [everUsed, setEverUsed] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) {
+      setHeld(false);
+      return;
+    }
+    const down = (e) => {
+      if (e.code !== "Space" || e.repeat) return;
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      e.preventDefault();
+      setHeld(true);
+      setEverUsed(true);
+      onDown?.();
+    };
+    const up = (e) => {
+      if (e.code !== "Space") return;
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      e.preventDefault();
+      setHeld(false);
+      onUp?.();
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, [enabled, onDown, onUp]);
+
+  return { held, everUsed };
+}
+
+function TrainingPill({ active, onToggle }) {
+  return (
+    <button
+      data-no-drag="true"
+      data-testid="training-toggle"
+      onClick={onToggle}
+      title="Training mode — orange theme, push-to-talk, skips compliance logging"
+      style={{
+        display: "flex", alignItems: "center", gap: 5,
+        padding: "3px 8px", borderRadius: 10, cursor: "pointer",
+        border: active ? `1px solid ${TRAINING_THEME.primary}` : "1px solid rgba(255,255,255,0.08)",
+        background: active ? "rgba(255,138,61,0.15)" : "rgba(255,255,255,0.04)",
+        boxShadow: active ? `0 0 8px rgba(255,138,61,0.3)` : "none",
+        animation: active ? "trainingPulse 2s ease-in-out infinite" : "none",
+        transition: "background 0.2s, border 0.2s, box-shadow 0.2s",
+      }}
+    >
+      <div style={{
+        width: 6, height: 6, borderRadius: 3,
+        background: active ? TRAINING_THEME.primary : "rgba(255,255,255,0.25)",
+        boxShadow: active ? `0 0 4px ${TRAINING_THEME.primary}` : "none",
+        transition: "background 0.2s",
+      }} />
+      <span style={{
+        fontFamily: T.display, fontSize: 9, fontWeight: 700,
+        color: active ? TRAINING_THEME.primary : "rgba(255,255,255,0.35)",
+        letterSpacing: "0.04em",
+        transition: "color 0.2s",
+      }}>
+        {active ? "TRAINING" : "Training"}
+      </span>
+      <style>{`@keyframes trainingPulse { 0%,100% { box-shadow: 0 0 6px rgba(255,138,61,0.3); } 50% { box-shadow: 0 0 12px rgba(255,138,61,0.5); } }`}</style>
+    </button>
+  );
+}
 
 // ─── Responsive hook ───
 function useIsMobile(breakpoint = 768) {
@@ -115,7 +222,9 @@ function formatElapsed(ms) {
 // When `analyser` (an AnalyserNode) is provided, bar heights are driven by
 // real-time frequency data via requestAnimationFrame. Otherwise the bars
 // fall back to a CSS keyframe animation for the demo / muted state.
-function AudioWave({ active, color = T.teal, bars = 5, analyser = null }) {
+function AudioWave({ active, color, bars = 5, analyser = null }) {
+  const T = useTheme();
+  if (!color) color = T.teal;
   const barRefs = useRef([]);
 
   useEffect(() => {
@@ -172,9 +281,10 @@ function AudioWave({ active, color = T.teal, bars = 5, analyser = null }) {
 // ═══════════════════════════════════════
 
 function ConfidencePill({ level }) {
+  const T = useTheme();
   const map = {
-    verified: { bg: "rgba(52,199,123,0.15)", bd: "rgba(52,199,123,0.3)", c: "#34C77B", label: "✓ verified" },
-    high:     { bg: "rgba(0,123,127,0.18)",  bd: "rgba(0,123,127,0.35)", c: "#1A9EA2", label: "high" },
+    verified: { bg: `rgba(${T.greenRgb},0.15)`, bd: `rgba(${T.greenRgb},0.3)`, c: T.green, label: "✓ verified" },
+    high:     { bg: `rgba(${T.tealRgb},0.18)`,  bd: `rgba(${T.tealRgb},0.35)`, c: T.tealLight, label: "high" },
     medium:   { bg: "rgba(245,166,35,0.08)", bd: "rgba(245,166,35,0.35)", c: "#F5A623", label: "medium" },
     low:      { bg: "rgba(231,76,60,0.08)",  bd: "rgba(231,76,60,0.4)",   c: "#ff8a7b", label: "low" },
   };
@@ -200,8 +310,9 @@ function mapLiveTranscripts(transcripts) {
     const time = ts && !Number.isNaN(ts.getTime())
       ? `${String(ts.getMinutes()).padStart(2, "0")}:${String(ts.getSeconds()).padStart(2, "0")}`
       : `${String(Math.floor(i / 6)).padStart(2, "0")}:${String((i * 10) % 60).padStart(2, "0")}`;
-    const speakerNum = typeof u.speaker === "number" ? u.speaker : 0;
-    const speaker = speakerNum % 2 === 0 ? "agent" : "client";
+    const speaker = (u.speaker === "agent" || u.speaker === "client")
+      ? u.speaker
+      : (typeof u.speaker === "number" ? (u.speaker % 2 === 0 ? "agent" : "client") : "agent");
     const text = u.text || "";
     const isQuestion = /\?\s*$/.test(text);
     return { time, speaker, text, isQuestion };
@@ -217,12 +328,18 @@ function liveSuggestionsToCards(suggestions) {
     .filter((s) => s.status === "done" && s.suggestion)
     .map((s) => {
       const ai = s.suggestion;
+      const primary = ai.primary || ai.sayThis;
       return {
         trigger: `Live · ${s.kind}`,
         context: { screen: "Live", audio: `Live trigger: ${s.kind}` },
-        // Mobile card uses `response`; desktop renderer reads `sayThis`.
-        response: ai.sayThis,
-        sayThis: ai.sayThis,
+        response: primary,
+        sayThis: primary,
+        primary,
+        bridging_phrase: ai.bridging_phrase || null,
+        verbatim_next: ai.verbatim_next || null,
+        alternates: ai.alternates || [],
+        compliance_reminder: ai.compliance_reminder || null,
+        why: ai.why || null,
         pressMore: ai.pressMore || [],
         followUps: ai.followUps || [],
         compliance: ai.compliance,
@@ -299,7 +416,23 @@ function useAudioErrorToasts({ noKeyError, micError, streamError }) {
   }, [noKeyError, micError, streamError, toast]);
 }
 
+function useSuggestionErrorToasts(suggestions) {
+  const toast = useToast();
+  const seenRef = useRef(new Set());
+  useEffect(() => {
+    for (const s of suggestions) {
+      if (s.status !== "error" || seenRef.current.has(s.id)) continue;
+      seenRef.current.add(s.id);
+      const msg = s.errorMessage === "No transcript context yet — start speaking first"
+        ? "Say something first — Ask AI needs a few seconds of conversation to work with."
+        : (s.errorMessage || "Suggestion failed");
+      toast.show({ kind: "warn", title: "Ask AI", detail: msg });
+    }
+  }, [suggestions, toast]);
+}
+
 function RecordingPill({ audioOn }) {
+  const T = useTheme();
   if (!audioOn) return null;
   return (
     <span style={{
@@ -322,13 +455,14 @@ function RecordingPill({ audioOn }) {
 // MOCK_LEADS + RECENT_LEADS now live in src/data/leads.js (P0 extraction)
 
 function SwitchLeadModal({ activeId, onPick, onClose }) {
+  const T = useTheme();
   const [q, setQ] = useState("");
   const filtered = RECENT_LEADS.filter(l =>
     l.name.toLowerCase().includes(q.toLowerCase()) || l.sub.toLowerCase().includes(q.toLowerCase())
   );
   return (
     <div data-no-drag="true" style={{
-      position: "absolute", inset: 0, zIndex: 200,
+      position: "fixed", inset: 0, zIndex: 200,
       background: "rgba(10,12,16,0.55)", backdropFilter: "blur(6px)",
       display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 60,
       cursor: "default",
@@ -362,7 +496,7 @@ function SwitchLeadModal({ activeId, onPick, onClose }) {
           {filtered.map(l => (
             <button key={l.id} onClick={() => onPick(l.id)} style={{
               width: "100%", display: "block", textAlign: "left", cursor: "pointer",
-              padding: "10px 14px", background: l.id === activeId ? "rgba(0,123,127,0.1)" : "transparent",
+              padding: "10px 14px", background: l.id === activeId ? `rgba(${T.tealRgb},0.1)` : "transparent",
               border: "none", borderBottom: "1px solid rgba(255,255,255,0.04)",
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -386,6 +520,7 @@ function SwitchLeadModal({ activeId, onPick, onClose }) {
 }
 
 function CaptureLeadModal({ onCommit, onClose }) {
+  const T = useTheme();
   // choose | capturing | selecting | extracting | review | paste | error
   const [stage, setStage] = useState("choose");
   const [extracted, setExtracted] = useState(null);
@@ -585,7 +720,7 @@ function CaptureLeadModal({ onCommit, onClose }) {
 
   return (
     <div data-no-drag="true" style={{
-      position: "absolute", inset: 0, zIndex: 200,
+      position: "fixed", inset: 0, zIndex: 200,
       background: "rgba(10,12,16,0.6)", backdropFilter: "blur(6px)",
       display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 48,
       cursor: "default",
@@ -699,8 +834,8 @@ function CaptureLeadModal({ onCommit, onClose }) {
                     left: marquee.x, top: marquee.y,
                     width: marquee.w, height: marquee.h,
                     border: `2px dashed ${T.tealLight}`,
-                    boxShadow: "0 0 0 1px rgba(0,123,127,0.3), 0 8px 24px rgba(0,123,127,0.25)",
-                    background: "rgba(0,123,127,0.05)",
+                    boxShadow: `0 0 0 1px rgba(${T.tealRgb},0.3), 0 8px 24px rgba(${T.tealRgb},0.25)`,
+                    background: `rgba(${T.tealRgb},0.05)`,
                     pointerEvents: "none",
                   }}>
                     {!dragging && hasAnyMarquee && (
@@ -709,7 +844,7 @@ function CaptureLeadModal({ onCommit, onClose }) {
                         fontFamily: T.mono, fontSize: 9,
                         color: marqueeTooSmall ? "#F5A623" : T.teal,
                         padding: "1px 5px",
-                        background: marqueeTooSmall ? "rgba(245,166,35,0.15)" : "rgba(0,123,127,0.15)",
+                        background: marqueeTooSmall ? "rgba(245,166,35,0.15)" : `rgba(${T.tealRgb},0.15)`,
                         borderRadius: 3,
                       }}>
                         {marqueeTooSmall
@@ -742,7 +877,7 @@ function CaptureLeadModal({ onCommit, onClose }) {
                 }
                 style={{
                   flex: 2, padding: "9px 12px",
-                  background: marqueeDone ? "linear-gradient(135deg, #007B7F, #004D50)" : "rgba(255,255,255,0.04)",
+                  background: marqueeDone ? `linear-gradient(135deg, ${T.teal}, ${T.tealDark})` : "rgba(255,255,255,0.04)",
                   border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
                   fontFamily: T.display, fontWeight: 700, fontSize: 11,
                   color: marqueeDone ? "#fff" : "rgba(255,255,255,0.3)",
@@ -779,7 +914,7 @@ function CaptureLeadModal({ onCommit, onClose }) {
               }}>Back</button>
               <button disabled={!pasteText.trim()} onClick={handlePasteExtract} style={{
                 flex: 2, padding: "9px 12px",
-                background: pasteText.trim() ? "linear-gradient(135deg, #007B7F, #004D50)" : "rgba(255,255,255,0.04)",
+                background: pasteText.trim() ? `linear-gradient(135deg, ${T.teal}, ${T.tealDark})` : "rgba(255,255,255,0.04)",
                 border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
                 fontFamily: T.display, fontWeight: 700, fontSize: 11,
                 color: pasteText.trim() ? "#fff" : "rgba(255,255,255,0.3)",
@@ -798,7 +933,7 @@ function CaptureLeadModal({ onCommit, onClose }) {
             <div style={{ height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden", marginBottom: 12 }}>
               <div style={{
                 height: "100%", width: "60%",
-                background: `linear-gradient(90deg, ${T.teal}, #34C77B)`,
+                background: `linear-gradient(90deg, ${T.teal}, ${T.green})`,
                 animation: "extractPulse 1.5s ease-in-out infinite",
               }} />
             </div>
@@ -876,7 +1011,7 @@ function CaptureLeadModal({ onCommit, onClose }) {
               }}>Cancel</button>
               <button onClick={() => onCommit(extracted)} style={{
                 flex: 2, padding: "9px 12px",
-                background: "linear-gradient(135deg, #007B7F, #004D50)",
+                background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`,
                 border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
                 fontFamily: T.display, fontWeight: 700, fontSize: 11, color: "#fff", cursor: "pointer",
                 letterSpacing: "0.04em", textTransform: "uppercase",
@@ -898,6 +1033,7 @@ function CaptureLeadModal({ onCommit, onClose }) {
 //   - "dob" | "phone" | "coverage": single-field update
 // Esc cancels; Enter or blur-outside commits.
 function EditableLeadCell({ field, editable, highlighted, scaledFont, onCommit }) {
+  const T = useTheme();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const inputRef = useRef(null);
@@ -982,6 +1118,7 @@ function EditableLeadCell({ field, editable, highlighted, scaledFont, onCommit }
 }
 
 function LeadContextPanel({ scaledFont = (x) => x }) {
+  const T = useTheme();
   const { lead: ctxLead, highlightedField, actions } = useLead();
   const [activeId, setActiveId] = useState("maria");
   const [showSwitch, setShowSwitch] = useState(false);
@@ -1053,7 +1190,7 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
     <div style={{
       padding: "10px 12px",
       borderBottom: "1px solid rgba(255,255,255,0.06)",
-      background: "linear-gradient(180deg, rgba(0,123,127,0.06), transparent)",
+      background: `linear-gradient(180deg, rgba(${T.tealRgb},0.06), transparent)`,
       position: "relative",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
@@ -1063,9 +1200,9 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
         <span style={{
           display: "inline-flex", alignItems: "center", gap: 4,
           fontFamily: T.display, fontWeight: 600, fontSize: 9,
-          color: "#34C77B", letterSpacing: "0.06em", textTransform: "uppercase", marginLeft: 6,
+          color: T.green, letterSpacing: "0.06em", textTransform: "uppercase", marginLeft: 6,
         }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#34C77B", boxShadow: "0 0 6px rgba(52,199,123,0.7)" }} />
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green, boxShadow: `0 0 6px rgba(${T.greenRgb},0.7)` }} />
           Ready
         </span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
@@ -1078,7 +1215,7 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
           <button data-no-drag="true" onClick={() => setShowCapture(true)} style={{
             fontFamily: T.display, fontWeight: 700, fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase",
             padding: "4px 8px", borderRadius: 6, cursor: "pointer",
-            background: "linear-gradient(135deg, #007B7F, #004D50)", color: "#fff",
+            background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, color: "#fff",
             border: "1px solid rgba(255,255,255,0.08)",
           }}>⊕ Capture Lead</button>
         </div>
@@ -1117,6 +1254,7 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
 }
 
 function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
+  const T = useTheme();
   const peclDone = peclItems.filter(i => i.done).length;
   const mspRow = peclItems.find(i => i.id === "msp");
   const mspCovered = mspRow?.done;
@@ -1125,7 +1263,7 @@ function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
     tpmo: "req", lis: "req", msp: "req", medigap: "rec", soa: "req",
   };
   const riskLabel = { req: "required", rec: "rec" };
-  const dotColor = { req: "#E74C3C", rec: "#F5A623", done: "#34C77B" };
+  const dotColor = { req: "#E74C3C", rec: "#F5A623", done: T.green };
   return (
     <div style={{
       padding: compact ? "8px 10px" : "10px 12px",
@@ -1138,7 +1276,7 @@ function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
         <AlertTriangle size={12} color="#F5A623" />
         <span style={{ fontFamily: T.display, fontWeight: 800, fontSize: 10, letterSpacing: "0.12em", color: "#F5A623", textTransform: "uppercase" }}>Compliance Hub</span>
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "baseline", gap: 3, fontFamily: T.mono, fontWeight: 600, fontSize: 11, color: "rgba(255,255,255,0.85)" }}>
-          <span style={{ color: peclDone === peclItems.length ? "#34C77B" : "#F5A623" }}>{peclDone}</span>
+          <span style={{ color: peclDone === peclItems.length ? T.green : "#F5A623" }}>{peclDone}</span>
           <span style={{ fontSize: 9, color: "rgba(255,255,255,0.4)" }}>/ {peclItems.length}</span>
         </span>
       </div>
@@ -1152,8 +1290,8 @@ function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
 
       {/* MSP dedicated card */}
       <div style={{
-        background: mspCovered ? "rgba(0,123,127,0.1)" : "rgba(245,166,35,0.08)",
-        border: `1px solid ${mspCovered ? "rgba(0,123,127,0.4)" : "rgba(245,166,35,0.35)"}`,
+        background: mspCovered ? `rgba(${T.tealRgb},0.1)` : "rgba(245,166,35,0.08)",
+        border: `1px solid ${mspCovered ? `rgba(${T.tealRgb},0.4)` : "rgba(245,166,35,0.35)"}`,
         borderRadius: 8, padding: "8px 10px", marginBottom: 10,
         animation: mspCovered ? "none" : "mspPulse 2.2s infinite",
       }}>
@@ -1161,8 +1299,8 @@ function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
           <span style={{
             display: "inline-flex", alignItems: "center", gap: 3,
             padding: "2px 6px", borderRadius: 4,
-            background: mspCovered ? "#34C77B" : "#F5A623",
-            color: mspCovered ? "#013014" : "#1a1200",
+            background: mspCovered ? T.green : "#F5A623",
+            color: mspCovered ? T.greenDark : "#1a1200",
             fontFamily: T.display, fontWeight: 800, fontSize: 8, letterSpacing: "0.08em", textTransform: "uppercase",
           }}>{mspCovered ? "✓ Covered" : "⚠ Action Required"}</span>
           <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 11, color: mspCovered ? "#a9e7d1" : "#ffd699", letterSpacing: "0.01em" }}>
@@ -1179,8 +1317,8 @@ function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
             <button data-no-drag="true" style={{
               fontFamily: T.display, fontWeight: 700, fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase",
               padding: "5px 9px", borderRadius: 6, cursor: "pointer",
-              background: "linear-gradient(135deg, #007B7F, #004D50)", color: "#fff",
-              border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 2px 8px rgba(0,123,127,0.3)",
+              background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, color: "#fff",
+              border: "1px solid rgba(255,255,255,0.08)", boxShadow: `0 2px 8px rgba(${T.tealRgb},0.3)`,
             }}>⊕ Insert MSP script</button>
             <button data-no-drag="true" style={{
               fontFamily: T.display, fontWeight: 700, fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase",
@@ -1216,10 +1354,10 @@ function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
             const interactive = typeof onTogglePecl === "function" && (isAuto || isManual || isOverridden || (!item.done && !isPending && false) || (!item.done));
             // Tag text + colors driven by the row's effective state.
             let tagText, tagBg, tagColor;
-            if (isAuto)            { tagText = "auto";     tagBg = "rgba(0,123,127,0.18)";  tagColor = "#7fd9dc"; }
-            else if (isManual)     { tagText = "manual";   tagBg = "rgba(52,199,123,0.18)"; tagColor = "#34C77B"; }
+            if (isAuto)            { tagText = "auto";     tagBg = `rgba(${T.tealRgb},0.18)`;  tagColor = T.tealLight; }
+            else if (isManual)     { tagText = "manual";   tagBg = `rgba(${T.greenRgb},0.18)`; tagColor = T.green; }
             else if (isOverridden) { tagText = "override"; tagBg = "rgba(245,166,35,0.18)"; tagColor = "#F5A623"; }
-            else if (item.done)    { tagText = "done";     tagBg = "rgba(52,199,123,0.12)"; tagColor = "#34C77B"; }
+            else if (item.done)    { tagText = "done";     tagBg = `rgba(${T.greenRgb},0.12)`; tagColor = T.green; }
             else if (r === "req")  { tagText = riskLabel[r] || "rec"; tagBg = "rgba(231,76,60,0.15)"; tagColor = "#ff8a7b"; }
             else                   { tagText = riskLabel[r] || "rec"; tagBg = "rgba(245,166,35,0.12)"; tagColor = "#F5A623"; }
             return (
@@ -1240,7 +1378,7 @@ function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
                 style={{
                   display: "flex", alignItems: "center", gap: 7,
                   padding: "4px 7px", borderRadius: 5,
-                  background: isOverridden ? "rgba(245,166,35,0.07)" : (item.done ? "rgba(52,199,123,0.04)" : (isPending ? "rgba(231,76,60,0.05)" : "transparent")),
+                  background: isOverridden ? "rgba(245,166,35,0.07)" : (item.done ? `rgba(${T.greenRgb},0.04)` : (isPending ? "rgba(231,76,60,0.05)" : "transparent")),
                   fontFamily: T.body, fontSize: 11,
                   cursor: interactive ? "pointer" : "default",
                 }}
@@ -1248,13 +1386,13 @@ function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
                 <span style={{
                   width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
                   background: isOverridden ? "#F5A623" : dotColor[r],
-                  boxShadow: isOverridden ? "0 0 6px rgba(245,166,35,0.55)" : (r === "req" ? "0 0 6px rgba(231,76,60,0.5)" : (r === "done" ? "0 0 6px rgba(52,199,123,0.5)" : "none")),
+                  boxShadow: isOverridden ? "0 0 6px rgba(245,166,35,0.55)" : (r === "req" ? "0 0 6px rgba(231,76,60,0.5)" : (r === "done" ? `0 0 6px rgba(${T.greenRgb},0.5)` : "none")),
                 }} />
                 <span style={{
                   flex: 1,
                   color: isOverridden ? "rgba(255,255,255,0.85)" : (item.done ? "rgba(255,255,255,0.55)" : (isPending ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.7)")),
                   textDecoration: item.done ? "line-through" : "none",
-                  textDecorationColor: "rgba(52,199,123,0.4)",
+                  textDecorationColor: `rgba(${T.greenRgb},0.4)`,
                 }}>{item.label}</span>
                 <span style={{
                   fontFamily: T.display, fontWeight: 800, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
@@ -1271,6 +1409,7 @@ function ComplianceHub({ peclItems, compact = false, onTogglePecl }) {
 }
 
 function MspInlineBadge({ covered, onClick }) {
+  const T = useTheme();
   const interactive = typeof onClick === "function" && !covered;
   const handleClick = (e) => {
     if (!interactive) return;
@@ -1286,8 +1425,8 @@ function MspInlineBadge({ covered, onClick }) {
       style={{
         display: "inline-flex", alignItems: "center", gap: 3,
         padding: "1px 5px", borderRadius: 3, marginLeft: 4,
-        background: covered ? "#34C77B" : "#F5A623",
-        color: covered ? "#013014" : "#1a1200",
+        background: covered ? T.green : "#F5A623",
+        color: covered ? T.greenDark : "#1a1200",
         fontFamily: T.display, fontWeight: 800, fontSize: 7, letterSpacing: "0.08em", textTransform: "uppercase",
         border: "none",
         cursor: interactive ? "pointer" : "default",
@@ -1295,8 +1434,8 @@ function MspInlineBadge({ covered, onClick }) {
     >
       <span style={{
         width: 9, height: 9, borderRadius: "50%",
-        background: covered ? "#013014" : "#1a1200",
-        color: covered ? "#34C77B" : "#F5A623",
+        background: covered ? T.greenDark : "#1a1200",
+        color: covered ? T.green : "#F5A623",
         fontSize: 7, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 800,
       }}>{covered ? "✓" : "!"}</span>
       {covered ? "MSP covered" : "MSP"}
@@ -1305,6 +1444,7 @@ function MspInlineBadge({ covered, onClick }) {
 }
 
 function SourcesRow({ sources }) {
+  const T = useTheme();
   const { actions } = useLead();
   if (!sources || sources.length === 0) return null;
 
@@ -1384,10 +1524,10 @@ function Five9Window({ callState = "idle", onStartCall, onEndCall }) {
   const isActive = callState === "active";
   const isEnded = callState === "ended";
   const statusLabel = isActive ? "CONNECTED" : isEnded ? "CALL ENDED" : "READY";
-  const statusColor = isActive ? "#34C77B" : isEnded ? "#ff8a7b" : "rgba(255,255,255,0.45)";
-  const statusDot = isActive ? "#34C77B" : isEnded ? "#E74C3C" : "rgba(255,255,255,0.35)";
+  const statusColor = isActive ? T.green : isEnded ? "#ff8a7b" : "rgba(255,255,255,0.45)";
+  const statusDot = isActive ? T.green : isEnded ? "#E74C3C" : "rgba(255,255,255,0.35)";
   const statusGlow = isActive
-    ? "0 0 8px rgba(52,199,123,0.5)"
+    ? `0 0 8px rgba(${T.greenRgb},0.5)`
     : isEnded
       ? "0 0 8px rgba(231,76,60,0.5)"
       : "none";
@@ -1398,7 +1538,7 @@ function Five9Window({ callState = "idle", onStartCall, onEndCall }) {
   // explicitly begin transcription); when active it's a red End Call.
   const primary = isActive
     ? { label: "End Call", icon: "📕", onClick: onEndCall, bg: "rgba(231,76,60,0.3)", color: "#ff8a7b" }
-    : { label: isEnded ? "Start New Call" : "Start Call", icon: "📞", onClick: onStartCall, bg: "rgba(52,199,123,0.25)", color: "#7be0a8" };
+    : { label: isEnded ? "Start New Call" : "Start Call", icon: "📞", onClick: onStartCall, bg: `rgba(${T.greenRgb},0.25)`, color: T.greenLight };
 
   const dimmed = !isActive;
 
@@ -1450,7 +1590,7 @@ function Five9Window({ callState = "idle", onStartCall, onEndCall }) {
             onClick={primary.onClick}
             style={{
               background: primary.bg,
-              border: `1px solid ${isActive ? "rgba(231,76,60,0.45)" : "rgba(52,199,123,0.45)"}`,
+              border: `1px solid ${isActive ? "rgba(231,76,60,0.45)" : `rgba(${T.greenRgb},0.45)`}`,
               borderRadius: 8, padding: "10px 20px", cursor: "pointer",
               display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
               animation: !isActive ? "fivePulse 2s ease-in-out infinite" : "none",
@@ -1459,7 +1599,7 @@ function Five9Window({ callState = "idle", onStartCall, onEndCall }) {
             <span style={{ fontSize: 18 }}>{primary.icon}</span>
             <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 700, color: primary.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{primary.label}</span>
           </button>
-          <style>{`@keyframes fivePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,199,123,0.45); } 50% { box-shadow: 0 0 0 6px rgba(52,199,123,0); } }`}</style>
+          <style>{`@keyframes fivePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(${T.greenRgb},0.45); } 50% { box-shadow: 0 0 0 6px rgba(${T.greenRgb},0); } }`}</style>
         </div>
       </div>
     </div>
@@ -1471,14 +1611,14 @@ function Five9Window({ callState = "idle", onStartCall, onEndCall }) {
 // ═══════════════════════════════════════
 
 function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsertScript, insertedScripts, mspCovered }) {
-  // Augment the visible response copy when the agent has clicked a
-  // compliance pill (tier 4). Tracks which scripts were inserted so the
-  // card can show a small "+ MSP script" attribution under the body.
+  const [showAlternates, setShowAlternates] = useState(false);
   const { sayThis: augmented, inserted } = applyInsertedScripts(
     resp.response,
     insertedScripts
   );
   const hasInsertions = inserted.length > 0;
+  const hasVerbatim = Boolean(resp.verbatim_next);
+  const hasAlternates = resp.alternates && resp.alternates.length > 0;
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -1486,13 +1626,26 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsert
         <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.3)" }}>MediCopilot</span>
         <div style={{ flex: 1 }} />
         <div style={{ display: "flex", gap: 4 }}>
-          {audioOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(52,199,123,0.5)", background: "rgba(52,199,123,0.06)", padding: "1px 4px", borderRadius: 3 }}>🎙 audio</span>}
-          {screenOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(0,123,127,0.5)", background: "rgba(0,123,127,0.06)", padding: "1px 4px", borderRadius: 3 }}>🖥 screen</span>}
+          {audioOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: `rgba(${T.greenRgb},0.5)`, background: `rgba(${T.greenRgb},0.06)`, padding: "1px 4px", borderRadius: 3 }}>🎙 audio</span>}
+          {screenOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: `rgba(${T.tealRgb},0.5)`, background: `rgba(${T.tealRgb},0.06)`, padding: "1px 4px", borderRadius: 3 }}>🖥 screen</span>}
         </div>
       </div>
-      <div style={{ padding: "4px 8px", marginBottom: 6, background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.03)" }}>
-        <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>Context: {resp.context.audio}</span>
-      </div>
+      {resp.why && (
+        <div style={{ padding: "4px 8px", marginBottom: 6, background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.03)" }}>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>{resp.why}</span>
+        </div>
+      )}
+      {!resp.why && (
+        <div style={{ padding: "4px 8px", marginBottom: 6, background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.03)" }}>
+          <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.25)" }}>Context: {resp.context.audio}</span>
+        </div>
+      )}
+      {resp.compliance_reminder && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 6, padding: "8px 10px", background: "rgba(245,166,35,0.1)", border: "1px solid rgba(245,166,35,0.25)", borderRadius: 8 }}>
+          <AlertTriangle size={12} color="#F5A623" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontFamily: T.display, fontSize: scaledFont(11), fontWeight: 600, color: "#F5A623", lineHeight: 1.4 }}>{resp.compliance_reminder}</span>
+        </div>
+      )}
       <div style={{ padding: "10px 12px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "12px 12px 12px 4px" }}>
         <div style={{ fontFamily: T.body, fontSize: scaledFont(13), color: `rgba(255,255,255,${Math.min(opacity+0.1,0.95)})`, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{augmented}</div>
         {hasInsertions && (
@@ -1501,10 +1654,45 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsert
               <span key={ins.id} style={{
                 display: "inline-flex", alignItems: "center", gap: 3,
                 padding: "1px 5px", borderRadius: 3,
-                background: "rgba(0,123,127,0.12)", color: T.teal,
+                background: `rgba(${T.tealRgb},0.12)`, color: T.teal,
                 fontFamily: T.display, fontWeight: 700, fontSize: 8, letterSpacing: "0.06em", textTransform: "uppercase",
               }}>+ {ins.label} script</span>
             ))}
+          </div>
+        )}
+        {resp.bridging_phrase && hasVerbatim && (
+          <div style={{ marginTop: 8, padding: "8px 10px", background: `rgba(${T.tealRgb},0.04)`, borderRadius: 6 }}>
+            <div style={{ fontFamily: T.body, fontStyle: "italic", fontSize: scaledFont(12), color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>{resp.bridging_phrase}</div>
+          </div>
+        )}
+        {hasVerbatim && (
+          <div style={{ marginTop: 6, padding: "10px 12px", background: `rgba(${T.tealRgb},0.08)`, border: `1px solid rgba(${T.tealRgb},0.2)`, borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
+              <Shield size={10} color={T.teal} />
+              <span style={{ fontFamily: T.display, fontSize: 8, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.06em" }}>Read exactly as shown</span>
+            </div>
+            <div style={{ fontFamily: T.body, fontSize: scaledFont(13), color: T.white, lineHeight: 1.6, fontWeight: 500 }}>"{resp.verbatim_next}"</div>
+          </div>
+        )}
+        {hasAlternates && (
+          <div style={{ marginTop: 8 }}>
+            <button onClick={() => setShowAlternates(!showAlternates)} style={{
+              background: "none", border: "none", cursor: "pointer", padding: 0,
+              display: "flex", alignItems: "center", gap: 4,
+              fontFamily: T.display, fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.35)",
+            }}>
+              <ChevronRight size={10} color="rgba(255,255,255,0.35)" style={{ transform: showAlternates ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
+              {showAlternates ? "Hide" : "Show"} {resp.alternates.length} alternate{resp.alternates.length > 1 ? "s" : ""}
+            </button>
+            {showAlternates && (
+              <div style={{ marginTop: 4 }}>
+                {resp.alternates.map((alt, i) => (
+                  <div key={i} style={{ padding: "6px 8px", marginTop: 3, background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.04)" }}>
+                    <span style={{ fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.55)", lineHeight: 1.4 }}>{alt}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {resp.plans && <div style={{ marginTop: 8 }}>
@@ -1520,12 +1708,12 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsert
                 </div>
                 <div style={{ fontFamily: T.mono, fontSize: scaledFont(9), color: "rgba(255,255,255,0.3)" }}>{p.tier} · PA: {p.pa} · {p.stars}</div>
               </div>
-              <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: scaledFont(13), color: "#34C77B" }}>{p.copay}</span>
+              <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: scaledFont(13), color: T.green }}>{p.copay}</span>
             </div>
           ))}
         </div>}
         {resp.detail && <div style={{ fontFamily: T.body, fontSize: scaledFont(12), color: "rgba(255,255,255,0.6)", marginTop: 6, lineHeight: 1.5 }}>{resp.detail}</div>}
-        {resp.trifecta && <div style={{ display: "flex", gap: 6, marginTop: 8, padding: "6px 8px", background: "rgba(0,123,127,0.06)", border: "1px solid rgba(0,123,127,0.15)", borderRadius: 6 }}>
+        {resp.trifecta && <div style={{ display: "flex", gap: 6, marginTop: 8, padding: "6px 8px", background: `rgba(${T.tealRgb},0.06)`, border: `1px solid rgba(${T.tealRgb},0.15)`, borderRadius: 6 }}>
           <Heart size={11} color={T.teal} style={{ flexShrink: 0, marginTop: 1 }} />
           <span style={{ fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.6)", lineHeight: 1.4 }}>{resp.trifecta}</span>
         </div>}
@@ -1533,7 +1721,7 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsert
           <Shield size={11} color="#F5A623" style={{ flexShrink: 0, marginTop: 1 }} />
           <span style={{ fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.55)", lineHeight: 1.4 }}>{resp.compliance}</span>
         </div>}
-        {resp.script && <div style={{ marginTop: 8, padding: "8px 10px", background: "rgba(0,123,127,0.06)", borderLeft: `2px solid ${T.teal}`, borderRadius: "0 6px 6px 0" }}>
+        {resp.script && <div style={{ marginTop: 8, padding: "8px 10px", background: `rgba(${T.tealRgb},0.06)`, borderLeft: `2px solid ${T.teal}`, borderRadius: "0 6px 6px 0" }}>
           <div style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: T.teal, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>Suggested Script</div>
           <div style={{ fontFamily: T.body, fontStyle: "italic", fontSize: scaledFont(11), color: "rgba(255,255,255,0.6)", lineHeight: 1.5 }}>{resp.script}</div>
         </div>}
@@ -1547,6 +1735,7 @@ function AIResponseCard({ resp, scaledFont, opacity, audioOn, screenOn, onInsert
 // ═══════════════════════════════════════
 
 function MobileLayout() {
+  const toast = useToast();
   const [tab, setTab] = useState("copilot"); // "call" | "copilot" | "transcript"
   const [viewMode, setViewMode] = useState("tabs"); // "tabs" | "split" | "full"
   const [splitPanels, setSplitPanels] = useState(["copilot", "transcript"]);
@@ -1568,9 +1757,10 @@ function MobileLayout() {
 
   // Call lifecycle from LeadContext. The audio pipeline only runs while
   // call.state === "active" (the agent has clicked Start Call).
-  const { lead: ctxLead, call } = useLead();
+  const { lead: ctxLead, call, training } = useLead();
   const callActive = call.state === "active";
   const callEnded = call.state === "ended";
+  const T = makeTheme(training.active);
 
   // Live audio pipeline. When VITE_BACKEND_WSS_URL isn't set the hook is a
   // no-op and `transcripts` stays empty — renderers fall back to the demo.
@@ -1578,7 +1768,23 @@ function MobileLayout() {
   // useLiveAudio cleanup (closes WSS intentionally + releases the mic).
   const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn && callActive });
   useAudioErrorToasts(liveAudio);
+  useSuggestionErrorToasts(liveAudio.suggestions);
   useLeadContextPush(liveAudio, ctxLead);
+
+  useEffect(() => {
+    liveAudio.setTrainingMode(training.active);
+  }, [training.active, liveAudio]);
+
+  const mobilePttDown = useCallback(() => {
+    training.setPttHeld(true);
+    liveAudio.setPttState(true);
+  }, [training, liveAudio]);
+  const mobilePttUp = useCallback(() => {
+    training.setPttHeld(false);
+    liveAudio.setPttState(false);
+  }, [training, liveAudio]);
+  const mobilePtt = usePushToTalk({ enabled: training.active && callActive, onDown: mobilePttDown, onUp: mobilePttUp });
+
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
   const renderedTranscript = usingLive
@@ -1640,6 +1846,14 @@ function MobileLayout() {
   }, [call]);
 
   const handleAskAI = () => {
+    if (BACKEND_WSS_URL) {
+      if (!callActive) {
+        toast.show({ kind: "warn", title: "Start a call first", detail: "Ask AI needs an active call with transcript context." });
+        return;
+      }
+      liveAudio.requestSuggestion();
+      return;
+    }
     if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
     if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
   };
@@ -1660,8 +1874,8 @@ function MobileLayout() {
   const renderCallInfo = () => (
     <div style={{ padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-        <div style={{ width: 10, height: 10, borderRadius: 5, background: "#34C77B", boxShadow: "0 0 8px rgba(52,199,123,0.5)" }} />
-        <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16, color: "#34C77B" }}>CONNECTED</span>
+        <div style={{ width: 10, height: 10, borderRadius: 5, background: T.green, boxShadow: `0 0 8px rgba(${T.greenRgb},0.5)` }} />
+        <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16, color: T.green }}>CONNECTED</span>
         <span style={{ fontFamily: T.mono, fontSize: 14, color: T.dusk }}>08:12</span>
       </div>
       <div style={{ fontFamily: T.mono, fontSize: 11, color: "#666", marginBottom: 16 }}>Campaign: AEP_MAPD_FL</div>
@@ -1699,16 +1913,16 @@ function MobileLayout() {
           </button>
         ) : (
           <button onClick={handleStartCall} style={{
-            background: "rgba(52,199,123,0.25)", border: "1px solid rgba(52,199,123,0.45)", borderRadius: 10,
+            background: `rgba(${T.greenRgb},0.25)`, border: `1px solid rgba(${T.greenRgb},0.45)`, borderRadius: 10,
             padding: "12px 8px", cursor: "pointer",
             display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
             animation: "fivePulse 2s ease-in-out infinite",
           }}>
             <span style={{ fontSize: 22 }}>📞</span>
-            <span style={{ fontFamily: T.display, fontSize: 11, color: "#7be0a8", fontWeight: 700 }}>{callEnded ? "Start New" : "Start Call"}</span>
+            <span style={{ fontFamily: T.display, fontSize: 11, color: T.greenLight, fontWeight: 700 }}>{callEnded ? "Start New" : "Start Call"}</span>
           </button>
         )}
-        <style>{`@keyframes fivePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,199,123,0.45); } 50% { box-shadow: 0 0 0 6px rgba(52,199,123,0); } }`}</style>
+        <style>{`@keyframes fivePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(${T.greenRgb},0.45); } 50% { box-shadow: 0 0 0 6px rgba(${T.greenRgb},0); } }`}</style>
       </div>
       <div style={{ marginTop: 16 }}>
         <ComplianceHub peclItems={peclItems} onTogglePecl={handlePeclToggle} />
@@ -1752,10 +1966,40 @@ function MobileLayout() {
         <span style={{ fontFamily: T.display, fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Live Transcript</span>
         {call.state === "idle" && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.04)", padding: "1px 5px", borderRadius: 3 }}>● idle</span>}
         {call.state === "ended" && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#ff8a7b", background: "rgba(231,76,60,0.12)", padding: "1px 5px", borderRadius: 3 }}>● ended</span>}
-        {callActive && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
+        {callActive && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: T.green, background: `rgba(${T.greenRgb},0.08)`, padding: "1px 5px", borderRadius: 3 }}>● live</span>}
         {callActive && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
-        {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)", marginLeft: "auto" }}>Five9 — Maria Garcia</span>}
+        {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: `rgba(${T.tealRgb},0.6)`, marginLeft: "auto" }}>Five9 — Maria Garcia</span>}
+        {usingLive && !training.active && <button onClick={() => liveAudio.recalibrateSpeakers()} style={{ marginLeft: usingLive && !screenOn ? "auto" : 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.4)" }}>↻ Swap speakers</button>}
+        {training.active && callActive && (
+          <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 9, fontWeight: 700, color: mobilePtt.held ? TRAINING_THEME.primary : "rgba(255,255,255,0.3)", background: mobilePtt.held ? "rgba(255,138,61,0.15)" : "rgba(255,255,255,0.05)", padding: "2px 6px", borderRadius: 3 }}>
+            {mobilePtt.held ? "Agent speaking" : "Client speaking"}
+          </span>
+        )}
       </div>
+      {training.active && callActive && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", marginBottom: 8 }}>
+          <button
+            onMouseDown={mobilePttDown}
+            onMouseUp={mobilePttUp}
+            onMouseLeave={mobilePttUp}
+            onTouchStart={mobilePttDown}
+            onTouchEnd={mobilePttUp}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              padding: "10px 20px", borderRadius: 10, cursor: "pointer", border: "none",
+              background: mobilePtt.held ? TRAINING_THEME.primary : "rgba(255,255,255,0.08)",
+              color: mobilePtt.held ? T.white : "rgba(255,255,255,0.5)",
+              transition: "background 0.15s, color 0.15s",
+            }}
+          >
+            <Mic size={16} />
+            <span style={{ fontFamily: T.display, fontSize: 12, fontWeight: 700 }}>{mobilePtt.held ? "Speaking as Agent" : "Hold to Speak"}</span>
+          </button>
+          {!mobilePtt.everUsed && (
+            <span style={{ fontFamily: T.mono, fontSize: 10, color: "rgba(255,255,255,0.35)" }}>Hold SPACE while you speak</span>
+          )}
+        </div>
+      )}
       {renderedTranscript.map((line, i) => (
         <div key={i} style={{ display: "flex", gap: 8, padding: "6px 0", alignItems: "flex-start", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
           <span style={{ fontFamily: T.mono, fontSize: 10, color: "rgba(255,255,255,0.15)", minWidth: 32 }}>{line.time}</span>
@@ -1765,7 +2009,7 @@ function MobileLayout() {
           <span style={{ fontFamily: T.body, fontSize: 13, lineHeight: 1.5, flex: 1, color: line.isQuestion ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.45)", fontWeight: line.isQuestion ? 500 : 400 }}>
             {line.text}
             {line.isQuestion && (
-              <span style={{ marginLeft: 6, fontFamily: T.display, fontSize: 9, fontWeight: 700, color: T.teal, background: "rgba(0,123,127,0.15)", padding: "2px 6px", borderRadius: 3, verticalAlign: "middle" }}>? DETECTED</span>
+              <span style={{ marginLeft: 6, fontFamily: T.display, fontSize: 9, fontWeight: 700, color: T.teal, background: `rgba(${T.tealRgb},0.15)`, padding: "2px 6px", borderRadius: 3, verticalAlign: "middle" }}>? DETECTED</span>
             )}
           </span>
         </div>
@@ -1782,7 +2026,7 @@ function MobileLayout() {
 
   // ─── Shared input bar ───
   const InputBar = () => (
-    <div style={{ padding: "10px 12px", paddingBottom: "max(10px, env(safe-area-inset-bottom))", background: "rgba(0,40,42,0.95)", borderTop: "1px solid rgba(0,123,127,0.2)", flexShrink: 0 }}>
+    <div style={{ padding: "10px 12px", paddingBottom: "max(10px, env(safe-area-inset-bottom))", background: "rgba(0,40,42,0.95)", borderTop: `1px solid rgba(${T.tealRgb},0.2)`, flexShrink: 0 }}>
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "2px 2px 2px 12px" }}>
           <input placeholder="Ask MediCopilot..." value={inputVal} onChange={e => setInputVal(e.target.value)}
@@ -1792,7 +2036,7 @@ function MobileLayout() {
             <Send size={16} color={T.white} />
           </button>
         </div>
-        <button onClick={handleAskAI} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", background: "linear-gradient(135deg, #007B7F, #004D50)", border: "none", borderRadius: 12, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
+        <button onClick={handleAskAI} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 12, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
           <Zap size={16} color={T.white} />
           <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 13, color: T.white }}>Ask AI</span>
         </button>
@@ -1823,13 +2067,13 @@ function MobileLayout() {
 
   // ─── Context bar (shown in tabs + split modes) ───
   const ContextBar = () => (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "rgba(0,40,42,0.5)", borderBottom: "1px solid rgba(0,123,127,0.08)", flexShrink: 0, flexWrap: "wrap" }}>
-      <button onClick={() => callActive && setAudioOn(!audioOn)} disabled={!callActive} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: !callActive ? "rgba(255,255,255,0.03)" : (audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)"), border: `1px solid ${!callActive ? "rgba(255,255,255,0.06)" : (audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)")}`, borderRadius: 6, cursor: callActive ? "pointer" : "default", opacity: callActive ? 1 : 0.5 }}>
-        {audioOn && callActive ? <Volume2 size={12} color="#34C77B" /> : <MicOff size={12} color="rgba(255,255,255,0.3)" />}
-        <AudioWave active={audioOn && callActive} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
-        <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: audioOn && callActive ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn && callActive ? (liveAudio.live ? "Listening" : BACKEND_WSS_URL ? "Connecting" : "Listening") : "Muted"}</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", background: "rgba(0,40,42,0.5)", borderBottom: `1px solid rgba(${T.tealRgb},0.08)`, flexShrink: 0, flexWrap: "wrap" }}>
+      <button onClick={() => callActive && setAudioOn(!audioOn)} disabled={!callActive} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: !callActive ? "rgba(255,255,255,0.03)" : (audioOn ? `rgba(${T.greenRgb},0.1)` : "rgba(255,255,255,0.04)"), border: `1px solid ${!callActive ? "rgba(255,255,255,0.06)" : (audioOn ? `rgba(${T.greenRgb},0.25)` : "rgba(255,255,255,0.08)")}`, borderRadius: 6, cursor: callActive ? "pointer" : "default", opacity: callActive ? 1 : 0.5 }}>
+        {audioOn && callActive ? <Volume2 size={12} color={T.green} /> : <MicOff size={12} color="rgba(255,255,255,0.3)" />}
+        <AudioWave active={audioOn && callActive} color={T.green} bars={4} analyser={liveAudio.analyser} />
+        <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: audioOn && callActive ? T.green : "rgba(255,255,255,0.3)" }}>{audioOn && callActive ? (liveAudio.live ? "Listening" : BACKEND_WSS_URL ? "Connecting" : "Listening") : "Muted"}</span>
       </button>
-      <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? "rgba(0,123,127,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
+      <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: screenOn ? `rgba(${T.tealRgb},0.1)` : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? `rgba(${T.tealRgb},0.25)` : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
         <Monitor size={12} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
         <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: screenOn ? T.teal : "rgba(255,255,255,0.3)" }}>{screenOn ? "Screen On" : "Screen Off"}</span>
       </button>
@@ -1839,12 +2083,13 @@ function MobileLayout() {
           <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 700, color: "#ff8a7b" }}>End Call</span>
         </button>
       ) : (
-        <button onClick={handleStartCall} title="Start the call — opens mic + transcription" style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", background: "rgba(52,199,123,0.18)", border: "1px solid rgba(52,199,123,0.5)", borderRadius: 6, cursor: "pointer", animation: "ctxStartPulse 2s ease-in-out infinite" }}>
-          <Phone size={11} color="#34C77B" />
-          <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 800, color: "#7be0a8", textTransform: "uppercase", letterSpacing: "0.04em" }}>{callEnded ? "Start New Call" : "Start Call"}</span>
+        <button onClick={handleStartCall} title="Start the call — opens mic + transcription" style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", background: `rgba(${T.greenRgb},0.18)`, border: `1px solid rgba(${T.greenRgb},0.5)`, borderRadius: 6, cursor: "pointer", animation: "ctxStartPulse 2s ease-in-out infinite" }}>
+          <Phone size={11} color={T.green} />
+          <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 800, color: T.greenLight, textTransform: "uppercase", letterSpacing: "0.04em" }}>{callEnded ? "Start New Call" : "Start Call"}</span>
         </button>
       )}
-      <style>{`@keyframes ctxStartPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,199,123,0.45); } 50% { box-shadow: 0 0 0 5px rgba(52,199,123,0); } }`}</style>
+      <style>{`@keyframes ctxStartPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(${T.greenRgb},0.45); } 50% { box-shadow: 0 0 0 5px rgba(${T.greenRgb},0); } }`}</style>
+      <TrainingPill active={training.active} onToggle={() => training.setActive(!training.active)} />
       <div style={{ flex: 1 }} />
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(245,166,35,0.08)", borderRadius: 6 }}>
         <AlertTriangle size={10} color="#F5A623" />
@@ -1852,7 +2097,7 @@ function MobileLayout() {
       </div>
       <div style={{ display: "flex", gap: 3 }}>
         {[{ icon: Heart, label: "MAPD", on: true }, { icon: Coins, label: "Ancillary", on: shownResponses >= 3 }, { icon: Sprout, label: "Life", on: false }].map(({ icon: Ic, label, on }) => (
-          <div key={label} style={{ display: "flex", alignItems: "center", gap: 3, padding: "3px 6px", borderRadius: 4, background: on ? "rgba(0,123,127,0.12)" : "transparent" }}>
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 3, padding: "3px 6px", borderRadius: 4, background: on ? `rgba(${T.tealRgb},0.12)` : "transparent" }}>
             <Ic size={10} color={on ? T.teal : "rgba(255,255,255,0.12)"} />
             <span style={{ fontFamily: T.display, fontSize: 8, fontWeight: on ? 700 : 400, color: on ? T.teal : "rgba(255,255,255,0.15)" }}>{label}</span>
           </div>
@@ -1865,15 +2110,15 @@ function MobileLayout() {
     <div style={{ width: "100%", height: "100vh", display: "flex", flexDirection: "column", background: "#0a1628", overflow: "hidden" }}>
 
       {/* ─── Mobile Header ─── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", background: "rgba(0,40,42,0.95)", borderBottom: "1px solid rgba(0,123,127,0.2)", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", background: "rgba(0,40,42,0.95)", borderBottom: `1px solid rgba(${T.tealRgb},0.2)`, flexShrink: 0 }}>
         <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 18 }}>
           <span style={{ color: T.white }}>Tri</span><span style={{ color: T.coral }}>B</span><span style={{ color: T.white }}>e</span>
         </span>
         <span style={{ fontFamily: T.display, fontWeight: 400, fontSize: 11, color: "rgba(255,255,255,0.3)" }}>MediCopilot</span>
         <div style={{ flex: 1 }} />
-        <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(52,199,123,0.1)", borderRadius: 6 }}>
-          <Phone size={10} color="#34C77B" />
-          <span style={{ fontFamily: T.mono, fontSize: 10, color: "#34C77B" }}>8:12</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: `rgba(${T.greenRgb},0.1)`, borderRadius: 6 }}>
+          <Phone size={10} color={T.green} />
+          <span style={{ fontFamily: T.mono, fontSize: 10, color: T.green }}>8:12</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(255,255,255,0.04)", borderRadius: 6 }}>
           <Shield size={10} color={T.teal} />
@@ -1882,7 +2127,7 @@ function MobileLayout() {
       </div>
 
       {/* ─── View Mode Toggle Bar ─── */}
-      <div style={{ display: "flex", gap: 4, padding: "8px 16px", background: "rgba(0,40,42,0.85)", borderBottom: "1px solid rgba(0,123,127,0.15)", flexShrink: 0 }}>
+      <div style={{ display: "flex", gap: 4, padding: "8px 16px", background: "rgba(0,40,42,0.85)", borderBottom: `1px solid rgba(${T.tealRgb},0.15)`, flexShrink: 0 }}>
         {[
           { key: "tabs", label: "Tabs", icon: Menu },
           { key: "split", label: "Split", icon: GripVertical },
@@ -1891,8 +2136,8 @@ function MobileLayout() {
           <button key={key} onClick={() => setViewMode(key)} style={{
             flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
             padding: "7px 0", border: "none", borderRadius: 8, cursor: "pointer",
-            background: viewMode === key ? "rgba(0,123,127,0.25)" : "rgba(255,255,255,0.04)",
-            outline: viewMode === key ? `1px solid rgba(0,123,127,0.5)` : "1px solid rgba(255,255,255,0.06)",
+            background: viewMode === key ? `rgba(${T.tealRgb},0.25)` : "rgba(255,255,255,0.04)",
+            outline: viewMode === key ? `1px solid rgba(${T.tealRgb},0.5)` : "1px solid rgba(255,255,255,0.06)",
           }}>
             <Ic size={13} color={viewMode === key ? T.teal : "rgba(255,255,255,0.35)"} />
             <span style={{ fontFamily: T.display, fontSize: 11, fontWeight: viewMode === key ? 700 : 400, color: viewMode === key ? T.teal : "rgba(255,255,255,0.35)" }}>{label}</span>
@@ -1902,12 +2147,12 @@ function MobileLayout() {
 
       {/* ─── TABS MODE ─── */}
       {viewMode === "tabs" && <>
-        <div style={{ display: "flex", gap: 0, flexShrink: 0, background: "rgba(0,40,42,0.7)", borderBottom: "1px solid rgba(0,123,127,0.15)" }}>
+        <div style={{ display: "flex", gap: 0, flexShrink: 0, background: "rgba(0,40,42,0.7)", borderBottom: `1px solid rgba(${T.tealRgb},0.15)` }}>
           {panelDefs.map(({ key, label, icon: Ic }) => (
             <button key={key} onClick={() => setTab(key)} style={{
               flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
               padding: "10px 0", border: "none", cursor: "pointer",
-              background: tab === key ? "rgba(0,123,127,0.15)" : "transparent",
+              background: tab === key ? `rgba(${T.tealRgb},0.15)` : "transparent",
               borderBottom: tab === key ? `2px solid ${T.teal}` : "2px solid transparent",
             }}>
               <Ic size={14} color={tab === key ? T.teal : "rgba(255,255,255,0.3)"} />
@@ -1925,15 +2170,15 @@ function MobileLayout() {
       {/* ─── SPLIT MODE ─── */}
       {viewMode === "split" && <>
         {/* Panel picker — tap to swap which 2 panels are shown */}
-        <div style={{ display: "flex", gap: 4, padding: "6px 16px", background: "rgba(0,40,42,0.65)", borderBottom: "1px solid rgba(0,123,127,0.1)", flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 4, padding: "6px 16px", background: "rgba(0,40,42,0.65)", borderBottom: `1px solid rgba(${T.tealRgb},0.1)`, flexShrink: 0 }}>
           {panelDefs.map(({ key, label, icon: Ic }) => {
             const selected = splitPanels.includes(key);
             return (
               <button key={key} onClick={() => toggleSplitPanel(key)} style={{
                 flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
                 padding: "5px 0", border: "none", borderRadius: 6, cursor: "pointer",
-                background: selected ? "rgba(0,123,127,0.2)" : "rgba(255,255,255,0.04)",
-                outline: selected ? "1px solid rgba(0,123,127,0.4)" : "1px solid rgba(255,255,255,0.06)",
+                background: selected ? `rgba(${T.tealRgb},0.2)` : "rgba(255,255,255,0.04)",
+                outline: selected ? `1px solid rgba(${T.tealRgb},0.4)` : "1px solid rgba(255,255,255,0.06)",
               }}>
                 <Ic size={12} color={selected ? T.teal : "rgba(255,255,255,0.3)"} />
                 <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: selected ? 700 : 400, color: selected ? T.teal : "rgba(255,255,255,0.3)" }}>{label}</span>
@@ -1945,7 +2190,7 @@ function MobileLayout() {
         {/* Two panels side by side */}
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
           {splitPanels.map((key, i) => (
-            <div key={key} style={{ flex: 1, overflowY: "auto", borderRight: i === 0 ? "1px solid rgba(0,123,127,0.2)" : "none" }}>
+            <div key={key} style={{ flex: 1, overflowY: "auto", borderRight: i === 0 ? `1px solid rgba(${T.tealRgb},0.2)` : "none" }}>
               {renderPanelContent(key)}
             </div>
           ))}
@@ -1962,11 +2207,11 @@ function MobileLayout() {
           {panelDefs.map(({ key, label, icon: Ic }) => (
             <button key={key} onClick={() => setFullPanel(key)} style={{
               width: "100%", display: "flex", alignItems: "center", gap: 16,
-              padding: "18px 20px", border: "1px solid rgba(0,123,127,0.2)",
+              padding: "18px 20px", border: `1px solid rgba(${T.tealRgb},0.2)`,
               borderRadius: 14, cursor: "pointer", background: "rgba(0,40,42,0.6)",
               textAlign: "left",
             }}>
-              <div style={{ width: 44, height: 44, borderRadius: 12, background: "rgba(0,123,127,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: `rgba(${T.tealRgb},0.15)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <Ic size={22} color={T.teal} />
               </div>
               <div>
@@ -1990,6 +2235,7 @@ function MobileLayout() {
 // ═══════════════════════════════════════
 
 function MediCopilotOverlay({ mode, setMode, opacity }) {
+  const toast = useToast();
   const [inputVal, setInputVal] = useState("");
   const [audioOn, setAudioOn] = useState(true);
   const [screenOn, setScreenOn] = useState(true);
@@ -1997,7 +2243,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const [shownResponses, setShownResponses] = useState(1);
   const [tick, setTick] = useState(0);
   const [textScale, setTextScale] = useState(1);
-  const [viewMode, setViewMode] = useState("tabs"); // "tabs" | "split" | "full"
+  const [viewMode, setViewMode] = useState("split"); // "tabs" | "split" | "full"
   const [activeTab, setActiveTab] = useState("copilot");
   const [splitPanels, setSplitPanels] = useState(["transcript", "copilot"]);
   const [fullPanel, setFullPanel] = useState(null);
@@ -2012,9 +2258,10 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   // `call.startedAt` so MSP escalation only counts from when the agent
   // clicked Start Call (not from app mount). Frozen at end-time once
   // the call ends.
-  const { lead: ctxLead, call } = useLead();
+  const { lead: ctxLead, call, training } = useLead();
   const callActive = call.state === "active";
   const callEnded = call.state === "ended";
+  const T = makeTheme(training.active);
 
   const [elapsedMs, setElapsedMs] = useState(0);
   useEffect(() => {
@@ -2046,7 +2293,23 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   // call.state !== "active" forces enabled=false → useLiveAudio cleanup
   // releases the mic track and intentionally closes the WSS.
   const liveAudio = useLiveAudio({ url: BACKEND_WSS_URL, enabled: audioOn && callActive });
+
+  // Sync training mode to server when it changes
+  useEffect(() => {
+    liveAudio.setTrainingMode(training.active);
+  }, [training.active, liveAudio]);
+
+  const pttDown = useCallback(() => {
+    training.setPttHeld(true);
+    liveAudio.setPttState(true);
+  }, [training, liveAudio]);
+  const pttUp = useCallback(() => {
+    training.setPttHeld(false);
+    liveAudio.setPttState(false);
+  }, [training, liveAudio]);
+  const ptt = usePushToTalk({ enabled: training.active && callActive, onDown: pttDown, onUp: pttUp });
   useAudioErrorToasts(liveAudio);
+  useSuggestionErrorToasts(liveAudio.suggestions);
   useLeadContextPush(liveAudio, ctxLead);
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
@@ -2058,9 +2321,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     : transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text;
   const liveCards = liveSuggestionsToCards(liveAudio.suggestions);
   const collapsed = useDraggable(620, 55);
-  const expanded = useDraggable(560, 30);
+  const expanded = useDraggable(640, 30);
   const hidden = useDraggable(820, 55);
-  const { size: panelSize, onResizeStart } = useResizable(440, 600, 300, 200);
+  const { size: panelSize, onResizeStart } = useResizable(640, 570, 300, 200);
   const { size: collapsedSize, onResizeStart: onCollapsedResizeStart } = useResizable(390, 240, 300, 160);
   const scaledFont = (base) => Math.round(base * textScale);
   const cycleTextSize = () => setTextScale(s => {
@@ -2099,6 +2362,14 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const clearBorder = (a) => `1px solid rgba(0, 123, 127, ${a})`;
 
   const handleAskAI = () => {
+    if (BACKEND_WSS_URL) {
+      if (!callActive) {
+        toast.show({ kind: "warn", title: "Start a call first", detail: "Ask AI needs an active call with transcript context." });
+        return;
+      }
+      liveAudio.requestSuggestion();
+      return;
+    }
     if (shownResponses < aiResponses.length) setShownResponses(s => s + 1);
     if (visibleTranscript < transcriptLines.length) setVisibleTranscript(v => Math.min(v + 2, transcriptLines.length));
   };
@@ -2147,14 +2418,14 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
   // ─── Desktop panel content renderers ───
   const renderDesktopCallInfo = () => {
-    const dotBg = callActive ? "#34C77B" : callEnded ? "#E74C3C" : "rgba(255,255,255,0.35)";
+    const dotBg = callActive ? T.green : callEnded ? "#E74C3C" : "rgba(255,255,255,0.35)";
     const dotGlow = callActive
-      ? "0 0 6px rgba(52,199,123,0.4)"
+      ? `0 0 6px rgba(${T.greenRgb},0.4)`
       : callEnded
         ? "0 0 6px rgba(231,76,60,0.4)"
         : "none";
     const statusLabel = callActive ? "CONNECTED" : callEnded ? "CALL ENDED" : "READY";
-    const statusColor = callActive ? "#34C77B" : callEnded ? "#ff8a7b" : "rgba(255,255,255,0.45)";
+    const statusColor = callActive ? T.green : callEnded ? "#ff8a7b" : "rgba(255,255,255,0.45)";
     const elapsedLabel = callActive
       ? "08:12"
       : callEnded && call.startedAt && call.endedAt
@@ -2191,9 +2462,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             <span style={{ fontFamily: T.display, fontSize: 9, color: "#ff8a7b", fontWeight: 700 }}>End Call</span>
           </button>
         ) : (
-          <button onClick={handleStartCall} style={{ background: "rgba(52,199,123,0.25)", border: "1px solid rgba(52,199,123,0.45)", borderRadius: 8, padding: "8px 4px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, animation: "fivePulse 2s ease-in-out infinite" }}>
+          <button onClick={handleStartCall} style={{ background: `rgba(${T.greenRgb},0.25)`, border: `1px solid rgba(${T.greenRgb},0.45)`, borderRadius: 8, padding: "8px 4px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, animation: "fivePulse 2s ease-in-out infinite" }}>
             <span style={{ fontSize: 16 }}>📞</span>
-            <span style={{ fontFamily: T.display, fontSize: 9, color: "#7be0a8", fontWeight: 700 }}>{callEnded ? "Start New" : "Start Call"}</span>
+            <span style={{ fontFamily: T.display, fontSize: 9, color: T.greenLight, fontWeight: 700 }}>{callEnded ? "Start New" : "Start Call"}</span>
           </button>
         )}
       </div>
@@ -2209,9 +2480,10 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Live Transcript</span>
         {call.state === "idle" && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.05)", padding: "1px 5px", borderRadius: 3 }}>● idle</span>}
         {callEnded && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#ff8a7b", background: "rgba(231,76,60,0.12)", padding: "1px 5px", borderRadius: 3 }}>● ended</span>}
-        {callActive && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#34C77B", background: "rgba(52,199,123,0.08)", padding: "1px 5px", borderRadius: 3 }}>● live</span>}
+        {callActive && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: T.green, background: `rgba(${T.greenRgb},0.08)`, padding: "1px 5px", borderRadius: 3 }}>● live</span>}
         {callActive && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
-        {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(0,123,127,0.6)", marginLeft: "auto" }}>Five9 — Maria Garcia, 33024</span>}
+        {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: `rgba(${T.tealRgb},0.6)`, marginLeft: "auto" }}>Five9 — Maria Garcia, 33024</span>}
+        {usingLive && !training.active && <button onClick={() => liveAudio.recalibrateSpeakers()} style={{ marginLeft: usingLive && !screenOn ? "auto" : 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.4)" }}>↻ Swap speakers</button>}
       </div>
       {renderedTranscript.map((line, i) => (
         <div key={i} style={{ display: "flex", gap: 8, padding: "3px 0", alignItems: "flex-start" }}>
@@ -2221,7 +2493,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           </span>
           <span style={{ fontFamily: T.body, fontSize: scaledFont(12), lineHeight: 1.45, color: line.isQuestion ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.45)", fontWeight: line.isQuestion ? 500 : 400 }}>
             {line.text}
-            {line.isQuestion && <span style={{ marginLeft: 6, fontFamily: T.display, fontSize: 8, fontWeight: 700, color: T.teal, background: "rgba(0,123,127,0.15)", padding: "1px 5px", borderRadius: 3, verticalAlign: "middle" }}>? DETECTED</span>}
+            {line.isQuestion && <span style={{ marginLeft: 6, fontFamily: T.display, fontSize: 8, fontWeight: 700, color: T.teal, background: `rgba(${T.tealRgb},0.15)`, padding: "1px 5px", borderRadius: 3, verticalAlign: "middle" }}>? DETECTED</span>}
           </span>
         </div>
       ))}
@@ -2263,17 +2535,17 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         <div style={{ padding: "8px 14px" }}>
         {/* Detected trigger + source chips */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(0,123,127,0.1)", border: "1px solid rgba(0,123,127,0.2)", borderRadius: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: `rgba(${T.tealRgb},0.1)`, border: `1px solid rgba(${T.tealRgb},0.2)`, borderRadius: 20 }}>
             <Bot size={9} color={T.teal} />
             <span style={{ fontFamily: T.mono, fontSize: 9, color: T.teal }}>"{resp.trigger}"</span>
           </div>
           <div style={{ flex: 1 }} />
-          {audioOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(52,199,123,0.5)", background: "rgba(52,199,123,0.06)", padding: "1px 5px", borderRadius: 3 }}>🎙 audio</span>}
-          {screenOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(0,123,127,0.5)", background: "rgba(0,123,127,0.06)", padding: "1px 5px", borderRadius: 3 }}>🖥 screen</span>}
+          {audioOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: `rgba(${T.greenRgb},0.5)`, background: `rgba(${T.greenRgb},0.06)`, padding: "1px 5px", borderRadius: 3 }}>🎙 audio</span>}
+          {screenOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: `rgba(${T.tealRgb},0.5)`, background: `rgba(${T.tealRgb},0.06)`, padding: "1px 5px", borderRadius: 3 }}>🖥 screen</span>}
         </div>
 
         {/* ── Say this: ── */}
-        <div style={{ marginBottom: 10, background: "rgba(0,123,127,0.09)", border: "1px solid rgba(0,123,127,0.28)", borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0", padding: "10px 12px" }}>
+        <div style={{ marginBottom: 10, background: `rgba(${T.tealRgb},0.09)`, border: `1px solid rgba(${T.tealRgb},0.28)`, borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0", padding: "10px 12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
             <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.08em" }}>Say this:</span>
             <div style={{ flex: 1 }} />
@@ -2294,9 +2566,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
               style={{
                 fontFamily: T.display, fontWeight: 700, fontSize: 8, letterSpacing: "0.06em", textTransform: "uppercase",
                 padding: "2px 6px", borderRadius: 4, cursor: insertedScripts.has("msp") ? "default" : "pointer",
-                background: insertedScripts.has("msp") ? "rgba(255,255,255,0.04)" : "rgba(0,123,127,0.18)",
+                background: insertedScripts.has("msp") ? "rgba(255,255,255,0.04)" : `rgba(${T.tealRgb},0.18)`,
                 color: insertedScripts.has("msp") ? "rgba(255,255,255,0.3)" : T.teal,
-                border: "1px solid rgba(0,123,127,0.25)",
+                border: `1px solid rgba(${T.tealRgb},0.25)`,
               }}
             >+ MSP</button>
           </div>
@@ -2340,13 +2612,15 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         {/* Sources row */}
         <SourcesRow sources={sources} />
 
-        {/* Response counter */}
+        {/* Response counter — only visible in demo mode */}
+        {!BACKEND_WSS_URL && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>{shownResponses} / {aiResponses.length} responses</span>
           {shownResponses < aiResponses.length && (
             <span style={{ fontFamily: T.display, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>· click Ask AI for next</span>
           )}
         </div>
+        )}
         </div>
       </div>
     );
@@ -2360,8 +2634,40 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   };
 
   // ─── Shared desktop input bar ───
+  const showPtt = training.active && callActive;
   const DesktopInputBar = ({ style = {} }) => (
     <div data-no-drag="true" style={{ padding: "10px 14px", borderTop: "1px solid rgba(255,255,255,0.06)", cursor: "default", flexShrink: 0, ...style }}>
+      {showPtt && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <button
+            data-testid="ptt-mic-button"
+            onMouseDown={pttDown}
+            onMouseUp={pttUp}
+            onMouseLeave={pttUp}
+            style={{
+              flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              padding: "12px 20px", borderRadius: 10, cursor: "pointer",
+              border: ptt.held ? `2px solid ${TRAINING_THEME.primary}` : "2px solid rgba(255,138,61,0.3)",
+              background: ptt.held ? `rgba(255,138,61,0.25)` : "rgba(255,138,61,0.08)",
+              boxShadow: ptt.held ? `0 0 16px rgba(255,138,61,0.4)` : "none",
+              transition: "background 0.15s, border 0.15s, box-shadow 0.15s",
+            }}
+          >
+            <Mic size={18} color={ptt.held ? TRAINING_THEME.primary : "rgba(255,138,61,0.6)"} />
+            <span style={{ fontFamily: T.display, fontSize: 12, fontWeight: 700, color: ptt.held ? TRAINING_THEME.primary : "rgba(255,138,61,0.7)" }}>
+              {ptt.held ? "Speaking as Agent" : "Hold to Speak as Agent"}
+            </span>
+          </button>
+          <span data-testid="ptt-indicator" style={{ fontFamily: T.mono, fontSize: 9, fontWeight: 700, color: ptt.held ? TRAINING_THEME.primary : "rgba(255,255,255,0.35)", background: ptt.held ? "rgba(255,138,61,0.15)" : "rgba(255,255,255,0.05)", padding: "4px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+            {ptt.held ? "Agent speaking" : "Client speaking"}
+          </span>
+        </div>
+      )}
+      {showPtt && !ptt.everUsed && (
+        <div data-testid="ptt-hint" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, padding: "6px 10px", background: "rgba(255,138,61,0.06)", border: "1px solid rgba(255,138,61,0.15)", borderRadius: 8 }}>
+          <span style={{ fontFamily: T.mono, fontSize: 10, color: "rgba(255,138,61,0.7)" }}>Hold SPACE or press & hold mic button to speak as agent</span>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 6 }}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "2px 2px 2px 12px" }}>
           <input placeholder="Type or press ⌘Enter for AI response..." value={inputVal} onChange={e => setInputVal(e.target.value)}
@@ -2369,7 +2675,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           <button style={{ background: "none", border: "none", cursor: "pointer", padding: "8px 4px" }}><Mic size={15} color="rgba(255,255,255,0.2)" /></button>
           <button onClick={handleAskAI} style={{ background: T.teal, border: "none", borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}><Send size={14} color={T.white} /></button>
         </div>
-        <button onClick={handleAskAI} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 16px", background: "linear-gradient(135deg, #007B7F, #004D50)", border: "none", borderRadius: 12, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
+        <button onClick={handleAskAI} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 16px", background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 12, cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <Zap size={14} color={T.white} />
             <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: T.white }}>Ask AI</span>
@@ -2419,11 +2725,11 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             <span style={{ color: T.white }}>Tri</span><span style={{ color: T.coral }}>B</span><span style={{ color: T.white }}>e</span>
           </span>
           <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)", borderRadius: 6 }}>
-            {audioOn ? <Volume2 size={11} color="#34C77B" /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
-            <AudioWave active={audioOn} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
+          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: audioOn ? `rgba(${T.greenRgb},0.1)` : "rgba(255,255,255,0.04)", borderRadius: 6 }}>
+            {audioOn ? <Volume2 size={11} color={T.green} /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
+            <AudioWave active={audioOn} color={T.green} bars={4} analyser={liveAudio.analyser} />
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", borderRadius: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: screenOn ? `rgba(${T.tealRgb},0.1)` : "rgba(255,255,255,0.04)", borderRadius: 6 }}>
             <Monitor size={11} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(255,255,255,0.04)", borderRadius: 6 }}>
@@ -2434,6 +2740,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             <span style={{ fontFamily: T.display, fontSize: 8, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>A</span>
             <span style={{ fontFamily: T.display, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>A</span>
           </button>
+          <TrainingPill active={training.active} onToggle={() => training.setActive(!training.active)} />
           <button data-no-drag="true" onClick={() => setMode("expanded")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
             <Maximize2 size={14} color="rgba(255,255,255,0.5)" />
           </button>
@@ -2445,14 +2752,14 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         {/* Scrollable content */}
         <div data-no-drag="true" style={{ flex: 1, overflowY: "auto", padding: "0 12px 6px", cursor: "default" }}>
           {/* Transcript snippet */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", marginBottom: 6, background: "rgba(255,255,255,0.03)", borderRadius: 6, borderLeft: "2px solid rgba(52,199,123,0.4)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", marginBottom: 6, background: "rgba(255,255,255,0.03)", borderRadius: 6, borderLeft: `2px solid rgba(${T.greenRgb},0.4)` }}>
             <Volume2 size={10} color="rgba(255,255,255,0.3)" />
             <span style={{ fontFamily: T.body, fontStyle: "italic", fontSize: scaledFont(11), color: "rgba(255,255,255,0.5)", flex: 1 }}>
               "{latestTranscriptText.slice(0, 65)}{latestTranscriptText.length > 65 ? "..." : ""}"
             </span>
           </div>
           {/* Say this: preview */}
-          <div style={{ background: "rgba(0,123,127,0.09)", border: "1px solid rgba(0,123,127,0.25)", borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0", padding: "8px 10px" }}>
+          <div style={{ background: `rgba(${T.tealRgb},0.09)`, border: `1px solid rgba(${T.tealRgb},0.25)`, borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0", padding: "8px 10px" }}>
             <div style={{ fontFamily: T.display, fontSize: 8, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Say this:</div>
             <div style={{ fontFamily: T.body, fontSize: scaledFont(12), color: `rgba(255,255,255,${Math.min(opacity + 0.1, 0.95)})`, lineHeight: 1.55 }}>{latestResp.sayThis}</div>
           </div>
@@ -2465,7 +2772,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
               style={{ flex: 1, background: "none", border: "none", outline: "none", fontFamily: T.body, fontSize: scaledFont(12), color: T.white, padding: "7px 0" }} />
             <button onClick={handleAskAI} style={{ background: T.teal, border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer" }}><Send size={12} color={T.white} /></button>
           </div>
-          <button onClick={handleAskAI} style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 12px", background: "linear-gradient(135deg, #007B7F, #004D50)", border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
+          <button onClick={handleAskAI} style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 12px", background: `linear-gradient(135deg, ${T.teal}, ${T.tealDark})`, border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>
             <Zap size={13} color={T.white} />
             <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: scaledFont(11), color: T.white }}>Ask AI</span>
           </button>
@@ -2530,14 +2837,15 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           </span>
           <span style={{ fontFamily: T.display, fontWeight: 400, fontSize: 11, color: "rgba(255,255,255,0.3)" }}>MediCopilot</span>
           <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "rgba(52,199,123,0.1)", borderRadius: 6 }}>
-            <Phone size={10} color="#34C77B" />
-            <span style={{ fontFamily: T.mono, fontSize: 10, color: "#34C77B" }}>8:12</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: `rgba(${T.greenRgb},0.1)`, borderRadius: 6 }}>
+            <Phone size={10} color={T.green} />
+            <span style={{ fontFamily: T.mono, fontSize: 10, color: T.green }}>8:12</span>
           </div>
           <button data-no-drag="true" onClick={cycleTextSize} title={`Text: ${Math.round(textScale * 100)}%`} style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, cursor: "pointer", padding: "2px 6px", marginRight: 2 }}>
             <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>A</span>
             <span style={{ fontFamily: T.display, fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>A</span>
           </button>
+          <TrainingPill active={training.active} onToggle={() => training.setActive(!training.active)} />
           <button data-no-drag="true" onClick={() => setMode("collapsed")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}><Minimize2 size={14} color="rgba(255,255,255,0.5)" /></button>
           <button data-no-drag="true" onClick={() => setMode("hidden")} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}><EyeOff size={14} color="rgba(255,255,255,0.5)" /></button>
         </div>
@@ -2552,8 +2860,8 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             <button key={key} onClick={() => setViewMode(key)} style={{
               flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
               padding: "5px 0", border: "none", borderRadius: 6, cursor: "pointer",
-              background: viewMode === key ? "rgba(0,123,127,0.2)" : "rgba(255,255,255,0.03)",
-              outline: viewMode === key ? "1px solid rgba(0,123,127,0.4)" : "1px solid rgba(255,255,255,0.04)",
+              background: viewMode === key ? `rgba(${T.tealRgb},0.2)` : "rgba(255,255,255,0.03)",
+              outline: viewMode === key ? `1px solid rgba(${T.tealRgb},0.4)` : "1px solid rgba(255,255,255,0.04)",
             }}>
               <Ic size={11} color={viewMode === key ? T.teal : "rgba(255,255,255,0.3)"} />
               <span style={{ fontFamily: T.display, fontSize: 10, fontWeight: viewMode === key ? 700 : 400, color: viewMode === key ? T.teal : "rgba(255,255,255,0.3)" }}>{label}</span>
@@ -2563,12 +2871,12 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
         {/* ─── Context bar ─── */}
         <div data-no-drag="true" style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderBottom: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }}>
-          <button onClick={() => callActive && setAudioOn(!audioOn)} disabled={!callActive} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: !callActive ? "rgba(255,255,255,0.03)" : (audioOn ? "rgba(52,199,123,0.1)" : "rgba(255,255,255,0.04)"), border: `1px solid ${!callActive ? "rgba(255,255,255,0.06)" : (audioOn ? "rgba(52,199,123,0.25)" : "rgba(255,255,255,0.08)")}`, borderRadius: 6, cursor: callActive ? "pointer" : "default", opacity: callActive ? 1 : 0.5 }}>
-            {audioOn && callActive ? <Volume2 size={11} color="#34C77B" /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
-            <AudioWave active={audioOn && callActive} color="#34C77B" bars={4} analyser={liveAudio.analyser} />
-            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: audioOn && callActive ? "#34C77B" : "rgba(255,255,255,0.3)" }}>{audioOn && callActive ? (liveAudio.live ? "Listening" : (BACKEND_WSS_URL ? "Connecting" : "Listening")) : "Muted"}</span>
+          <button onClick={() => callActive && setAudioOn(!audioOn)} disabled={!callActive} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: !callActive ? "rgba(255,255,255,0.03)" : (audioOn ? `rgba(${T.greenRgb},0.1)` : "rgba(255,255,255,0.04)"), border: `1px solid ${!callActive ? "rgba(255,255,255,0.06)" : (audioOn ? `rgba(${T.greenRgb},0.25)` : "rgba(255,255,255,0.08)")}`, borderRadius: 6, cursor: callActive ? "pointer" : "default", opacity: callActive ? 1 : 0.5 }}>
+            {audioOn && callActive ? <Volume2 size={11} color={T.green} /> : <MicOff size={11} color="rgba(255,255,255,0.3)" />}
+            <AudioWave active={audioOn && callActive} color={T.green} bars={4} analyser={liveAudio.analyser} />
+            <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: audioOn && callActive ? T.green : "rgba(255,255,255,0.3)" }}>{audioOn && callActive ? (liveAudio.live ? "Listening" : (BACKEND_WSS_URL ? "Connecting" : "Listening")) : "Muted"}</span>
           </button>
-          <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: screenOn ? "rgba(0,123,127,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? "rgba(0,123,127,0.25)" : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
+          <button onClick={() => setScreenOn(!screenOn)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: screenOn ? `rgba(${T.tealRgb},0.1)` : "rgba(255,255,255,0.04)", border: `1px solid ${screenOn ? `rgba(${T.tealRgb},0.25)` : "rgba(255,255,255,0.08)"}`, borderRadius: 6, cursor: "pointer" }}>
             <Monitor size={11} color={screenOn ? T.teal : "rgba(255,255,255,0.3)"} />
             <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 600, color: screenOn ? T.teal : "rgba(255,255,255,0.3)" }}>{screenOn ? "Screen On" : "Screen Off"}</span>
           </button>
@@ -2578,12 +2886,12 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
               <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "#ff8a7b" }}>End Call</span>
             </button>
           ) : (
-            <button onClick={handleStartCall} title="Start the call — opens mic + transcription" style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", background: "rgba(52,199,123,0.18)", border: "1px solid rgba(52,199,123,0.5)", borderRadius: 6, cursor: "pointer", animation: "ctxStartPulse 2s ease-in-out infinite" }}>
-              <Phone size={10} color="#34C77B" />
-              <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 800, color: "#7be0a8", textTransform: "uppercase", letterSpacing: "0.04em" }}>{callEnded ? "Start New Call" : "Start Call"}</span>
+            <button onClick={handleStartCall} title="Start the call — opens mic + transcription" style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", background: `rgba(${T.greenRgb},0.18)`, border: `1px solid rgba(${T.greenRgb},0.5)`, borderRadius: 6, cursor: "pointer", animation: "ctxStartPulse 2s ease-in-out infinite" }}>
+              <Phone size={10} color={T.green} />
+              <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 800, color: T.greenLight, textTransform: "uppercase", letterSpacing: "0.04em" }}>{callEnded ? "Start New Call" : "Start Call"}</span>
             </button>
           )}
-          <style>{`@keyframes ctxStartPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,199,123,0.45); } 50% { box-shadow: 0 0 0 5px rgba(52,199,123,0); } }`}</style>
+          <style>{`@keyframes ctxStartPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(${T.greenRgb},0.45); } 50% { box-shadow: 0 0 0 5px rgba(${T.greenRgb},0); } }`}</style>
           <div style={{ flex: 1 }} />
           {mspBadge !== "hidden" && (
             <div
@@ -2619,7 +2927,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
               <button key={key} onClick={() => setActiveTab(key)} style={{
                 flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
                 padding: "8px 0", border: "none", cursor: "pointer",
-                background: activeTab === key ? "rgba(0,123,127,0.12)" : "transparent",
+                background: activeTab === key ? `rgba(${T.tealRgb},0.12)` : "transparent",
                 borderBottom: activeTab === key ? `2px solid ${T.teal}` : "2px solid transparent",
               }}>
                 <Ic size={11} color={activeTab === key ? T.teal : "rgba(255,255,255,0.3)"} />
@@ -2641,8 +2949,8 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
                 <button key={key} onClick={() => toggleSplitPanel(key)} style={{
                   flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 3,
                   padding: "4px 0", border: "none", borderRadius: 5, cursor: "pointer",
-                  background: selected ? "rgba(0,123,127,0.18)" : "rgba(255,255,255,0.03)",
-                  outline: selected ? "1px solid rgba(0,123,127,0.35)" : "1px solid rgba(255,255,255,0.04)",
+                  background: selected ? `rgba(${T.tealRgb},0.18)` : "rgba(255,255,255,0.03)",
+                  outline: selected ? `1px solid rgba(${T.tealRgb},0.35)` : "1px solid rgba(255,255,255,0.04)",
                 }}>
                   <Ic size={10} color={selected ? T.teal : "rgba(255,255,255,0.3)"} />
                   <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: selected ? 700 : 400, color: selected ? T.teal : "rgba(255,255,255,0.3)" }}>{label}</span>
@@ -2660,14 +2968,14 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
               onMouseDown={onSplitDividerDown}
               style={{
                 width: 9, flexShrink: 0, cursor: "col-resize", userSelect: "none",
-                background: "rgba(0,123,127,0.18)",
-                borderLeft: "1px solid rgba(0,123,127,0.35)",
-                borderRight: "1px solid rgba(0,123,127,0.35)",
+                background: `rgba(${T.tealRgb},0.18)`,
+                borderLeft: `1px solid rgba(${T.tealRgb},0.35)`,
+                borderRight: `1px solid rgba(${T.tealRgb},0.35)`,
                 display: "flex", alignItems: "center", justifyContent: "center",
                 transition: "background 0.12s",
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = "rgba(0,123,127,0.45)"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "rgba(0,123,127,0.18)"; }}
+              onMouseEnter={e => { e.currentTarget.style.background = `rgba(${T.tealRgb},0.45)`; }}
+              onMouseLeave={e => { e.currentTarget.style.background = `rgba(${T.tealRgb},0.18)`; }}
             >
               <div style={{ display: "flex", flexDirection: "column", gap: 3, pointerEvents: "none" }}>
                 {[0,1,2,3,4].map(i => (
@@ -2689,10 +2997,10 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             {panelDefs.map(({ key, label, icon: Ic }) => (
               <button key={key} onClick={() => setFullPanel(key)} style={{
                 width: "100%", display: "flex", alignItems: "center", gap: 12,
-                padding: "12px 14px", border: "1px solid rgba(0,123,127,0.18)",
+                padding: "12px 14px", border: `1px solid rgba(${T.tealRgb},0.18)`,
                 borderRadius: 10, cursor: "pointer", background: "rgba(0,40,42,0.5)", textAlign: "left",
               }}>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(0,123,127,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: `rgba(${T.tealRgb},0.12)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   <Ic size={18} color={T.teal} />
                 </div>
                 <div>
@@ -2739,7 +3047,7 @@ export default function MacOSDesktopMockup() {
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", inset: 0, background: "linear-gradient(135deg, #1a1a3e 0%, #2d1b4e 25%, #0f3460 50%, #16213e 75%, #1a1a2e 100%)" }}>
-        <div style={{ position: "absolute", top: "15%", left: "20%", width: 400, height: 400, borderRadius: "50%", background: "rgba(0,123,127,0.08)", filter: "blur(80px)" }} />
+        <div style={{ position: "absolute", top: "15%", left: "20%", width: 400, height: 400, borderRadius: "50%", background: `rgba(${T.tealRgb},0.08)`, filter: "blur(80px)" }} />
         <div style={{ position: "absolute", bottom: "20%", right: "30%", width: 300, height: 300, borderRadius: "50%", background: "rgba(244,124,110,0.06)", filter: "blur(60px)" }} />
       </div>
       <MacMenuBar />

@@ -191,7 +191,7 @@ test("INVARIANT: PII is redacted before utterance is broadcast", async () => {
     const frame = await nextMessage();
     assert.equal(frame.type, "utterance");
     assert.equal(frame.final, true);
-    assert.equal(frame.speaker, 1);
+    assert.equal(frame.speaker, "agent"); // first speaker is mapped to "agent"
     assert.equal(frame.ts, 12.34);
 
     // The broadcast text MUST NOT contain any of the PII strings.
@@ -261,4 +261,125 @@ test("client disconnect closes Deepgram session", async () => {
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(stub.calls.closed, 1);
   await app.close();
+});
+
+test("training mode: PTT overrides first-speaker heuristic", async () => {
+  const stub = makeDeepgramStub();
+  const app = await build(
+    { nodeEnv: "test", logLevel: "fatal", deepgramApiKey: "test-key" },
+    { deepgramFactory: stub.factory }
+  );
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const { port } = app.server.address();
+
+  const { ws, opened, nextMessage } = connect(`ws://127.0.0.1:${port}/stream`);
+  try {
+    await opened;
+    await nextMessage(); // hello
+
+    // Enable training mode BEFORE starting the call
+    ws.send(JSON.stringify({ type: "set_training_mode", enabled: true }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    ws.send(JSON.stringify({ type: "start" }));
+    await nextMessage(); // ready
+
+    const onUtt = stub.calls.onUtteranceRefs[0];
+
+    // PTT not held → should be "client" regardless of Deepgram speaker label
+    onUtt({ text: "Hello from the client.", isFinal: true, speaker: 0, ts: 1, words: [] });
+    const u1 = await nextMessage();
+    assert.equal(u1.speaker, "client", "PTT released → must be client");
+
+    // Hold PTT → should be "agent" regardless of Deepgram speaker label
+    ws.send(JSON.stringify({ type: "ptt_state", speaking: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    onUtt({ text: "Now I am the agent.", isFinal: true, speaker: 0, ts: 2, words: [] });
+    const u2 = await nextMessage();
+    assert.equal(u2.speaker, "agent", "PTT held → must be agent");
+
+    // Same Deepgram speaker (0) but PTT released → back to "client"
+    ws.send(JSON.stringify({ type: "ptt_state", speaking: false }));
+    await new Promise((r) => setTimeout(r, 20));
+    onUtt({ text: "Client again.", isFinal: true, speaker: 0, ts: 3, words: [] });
+    const u3 = await nextMessage();
+    assert.equal(u3.speaker, "client", "PTT released again → must be client");
+
+    // Different Deepgram speaker (1) with PTT held → still "agent" (DG label ignored)
+    ws.send(JSON.stringify({ type: "ptt_state", speaking: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    onUtt({ text: "Agent on speaker 1.", isFinal: true, speaker: 1, ts: 4, words: [] });
+    const u4 = await nextMessage();
+    assert.equal(u4.speaker, "agent", "PTT held, different DG speaker → must be agent");
+
+    // Deepgram speaker label should NOT matter at all in training mode
+    ws.send(JSON.stringify({ type: "ptt_state", speaking: false }));
+    await new Promise((r) => setTimeout(r, 20));
+    onUtt({ text: "Client on speaker 1.", isFinal: true, speaker: 1, ts: 5, words: [] });
+    const u5 = await nextMessage();
+    assert.equal(u5.speaker, "client", "PTT released, DG speaker 1 → must be client");
+  } finally {
+    ws.close();
+    await app.close();
+  }
+});
+
+test("training mode: first-speaker heuristic does not lock", async () => {
+  const stub = makeDeepgramStub();
+  const app = await build(
+    { nodeEnv: "test", logLevel: "fatal", deepgramApiKey: "test-key" },
+    { deepgramFactory: stub.factory }
+  );
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const { port } = app.server.address();
+
+  const { ws, opened, nextMessage } = connect(`ws://127.0.0.1:${port}/stream`);
+  try {
+    await opened;
+    await nextMessage(); // hello
+
+    ws.send(JSON.stringify({ type: "start" }));
+    await nextMessage(); // ready
+
+    const onUtt = stub.calls.onUtteranceRefs[0];
+
+    // Without training mode: first speaker locks as agent
+    onUtt({ text: "First speaker.", isFinal: true, speaker: 0, ts: 1, words: [] });
+    const u1 = await nextMessage();
+    assert.equal(u1.speaker, "agent", "first speaker locks as agent");
+
+    // Second speaker is client
+    onUtt({ text: "Second speaker.", isFinal: true, speaker: 1, ts: 2, words: [] });
+    const u2 = await nextMessage();
+    assert.equal(u2.speaker, "client", "second speaker is client");
+
+    // NOW enable training mode mid-call — heuristic should be disabled
+    ws.send(JSON.stringify({ type: "set_training_mode", enabled: true }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Without PTT held, any speaker → "client"
+    onUtt({ text: "Training client.", isFinal: true, speaker: 0, ts: 3, words: [] });
+    const u3 = await nextMessage();
+    assert.equal(u3.speaker, "client", "training mode on, PTT not held → client");
+
+    // With PTT held, any speaker → "agent"
+    ws.send(JSON.stringify({ type: "ptt_state", speaking: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    onUtt({ text: "Training agent.", isFinal: true, speaker: 1, ts: 4, words: [] });
+    const u4 = await nextMessage();
+    assert.equal(u4.speaker, "agent", "training mode on, PTT held → agent");
+
+    // Disable training mode — heuristic should re-lock with fresh state
+    ws.send(JSON.stringify({ type: "ptt_state", speaking: false }));
+    ws.send(JSON.stringify({ type: "set_training_mode", enabled: false }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    // First speaker after training off should re-lock as agent
+    onUtt({ text: "Post-training.", isFinal: true, speaker: 1, ts: 5, words: [] });
+    const u5 = await nextMessage();
+    assert.equal(u5.speaker, "agent", "after training off, first speaker re-locks as agent");
+  } finally {
+    ws.close();
+    await app.close();
+  }
 });

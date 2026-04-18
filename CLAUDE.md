@@ -14,6 +14,103 @@ Authoritative reference documents:
 
 If you read CLAUDE.md + PRD + ui-final-spec.md (in that order), you should be productive in under 5 minutes.
 
+## Coding principles
+
+Adapted from [Karpathy-inspired guidelines](https://github.com/forrestchang/andrej-karpathy-skills). These bias toward caution over speed. For trivial tasks, use judgment.
+
+### 1. Think before coding
+
+Don't assume. Don't hide confusion. Surface tradeoffs.
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity first
+
+Minimum code that solves the problem. Nothing speculative.
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical changes
+
+Touch only what you must. Clean up only your own mess.
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it — don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: every changed line should trace directly to the user's request.
+
+### 4. Goal-driven execution
+
+**This is the most important principle for this project.** Define success criteria. Loop until verified.
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+**MediCopilot-specific rule:** every fix that touches the live pipeline (server, audio, suggestions) MUST include verification that it actually works — Playwright test (`node scripts/debug/test-ask-ai-live.mjs`), `curl` check against the deployed endpoint, or screenshot proof. No more "fix shipped" without evidence it works in production.
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+These principles are working if: fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+## Deploy rules (DO NOT SKIP)
+
+### Server-side changes require manual Fly deploy on PR branches
+
+GitHub Actions auto-deploys the Fly server ONLY on pushes to `main`.
+PR preview deploys on Vercel test the new frontend against MAIN's
+server code — NOT the PR branch's server.
+
+**If your PR includes ANY files under `server/**`:**
+
+After `git push`, you MUST run:
+
+    cd server && fly deploy --remote-only -a medicopilot-myacaexpress
+
+Then verify:
+
+    curl https://medicopilot-myacaexpress.fly.dev/health
+
+The response should show `uptime` < 60 seconds.
+
+DO NOT tell the user "pushed to PR" until Fly deploy completes. The
+PR preview will be broken in non-obvious ways if you skip this.
+
+Alternative: use `npm run push-pr` which does both automatically.
+
+### Why this matters
+
+We hit this bug multiple times in P2: Ask AI button appeared to fail
+because the PR preview had new client code but stale server code.
+Each "fix" re-shipped stale logic. Three PRs of wasted effort.
+See plans/LESSONS.md for the full story.
+
 ## Current phase
 
 **P2 Tier 1 — Server scaffold.** Fastify 5 backend in `server/` with `@fastify/websocket`, pino logger, `GET /health`, and a skeleton `WSS /stream` that round-trips `ping`→`pong`. Deployable to Fly.io iad (`server/fly.toml` + Dockerfile). Tests: 36 frontend (Vitest) + 4 server (node:test). Tier 2 will wire browser mic → AudioWorklet → WSS → Deepgram.
@@ -116,6 +213,9 @@ All secrets live in environment variables — **never in the client bundle**. Se
 │   │       ├── health.js         — GET /health
 │   │       └── stream.js         — WSS /stream (Tier 1: ping/pong skeleton)
 │   └── test/                     — node:test runner (no vitest)
+├── e2e/                          — Playwright smoke suite (see e2e/README.md)
+│   ├── fixtures/                 — mockMediaDevices / mockApi / mockWss
+│   └── *.spec.js                 — smoke, capture, call-state, msp, pecl
 └── src-tauri/                    — Tauri wrapper (P4)
 ```
 
@@ -175,6 +275,11 @@ npm run test:watch  # Vitest in watch mode
 npm run server:dev  # Fastify server on :8080 (node --watch)
 npm run server:test # node:test runner for server/ (4 tests)
 ```
+
+Additional scripts:
+- `npm run e2e` — Playwright smoke suite (see [e2e/README.md](e2e/README.md))
+- `npm run e2e:ui` — Playwright UI runner for step-through debugging
+- `npm run e2e:report` — open the last HTML report
 
 Planned scripts (per phase):
 - `npm run typecheck` (P0 — JSDoc first, full TS at P2)

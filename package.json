@@ -11,7 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "server:dev": "npm --prefix server run dev",
-    "server:test": "npm --prefix server test"
+    "server:test": "npm --prefix server test",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:report": "playwright show-report",
+    "push-pr": "git push && (git diff --name-only origin/main...HEAD | grep -q '^server/' && (cd server && fly deploy --remote-only -a medicopilot-myacaexpress && curl -sS https://medicopilot-myacaexpress.fly.dev/health) || echo 'No server/ changes, Fly deploy skipped')"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",
@@ -21,6 +25,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.59.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",

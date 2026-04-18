@@ -22,6 +22,7 @@
  *     { type: "suggestion_done",  sessionId, id, kind, suggestion }         — final AIResponse
  *     { type: "suggestion_error", sessionId, id, kind, code, message }      — stream failed
  *     { type: "pecl_update", sessionId, items: PeclItemId[] }               — newly auto-marked items
+ *     { type: "speakers_recalibrated", sessionId, agentLabel: number }      — speaker mapping flipped
  *     { type: "pong", t: number }
  *     { type: "error", code: string, message: string }
  *   client→server:
@@ -29,6 +30,10 @@
  *     { type: "start", sampleRate?: number }                                — open Deepgram
  *     { type: "stop" }                                                      — close Deepgram
  *     { type: "lead_context", lead: object|null }                           — snapshot for Claude prompt
+ *     { type: "script_state", state: ScriptState|null }                     — PECL checklist state
+ *     { type: "call_timer", ms: number }                                    — elapsed call time
+ *     { type: "request_suggestion" }                                        — explicit "Ask AI" trigger
+ *     { type: "recalibrate_speakers" }                                      — flip agent/client mapping
  *     { type: "bye" }                                                       — graceful socket close
  *     <binary>                                                              — Int16LE PCM frame
  */
@@ -72,6 +77,28 @@ export default async function streamRoutes(app) {
     let frameCount = 0;
     let byteCount = 0;
 
+    // Speaker diarization mapping. The first speaker heard after Start
+    // Call is tagged "agent" (agents speak first 95%+ of the time).
+    // `recalibrate_speakers` flips the mapping if the heuristic is wrong.
+    /** @type {number|null} Deepgram speaker label assigned to "agent" */
+    let agentLabel = null;
+    /** @type {boolean} */
+    let speakerLocked = false;
+    let trainingMode = false;
+    let pttSpeaking = false;
+
+    const mapSpeaker = (dgSpeaker) => {
+      if (trainingMode) {
+        return pttSpeaking ? "agent" : "client";
+      }
+      if (!speakerLocked) {
+        agentLabel = dgSpeaker;
+        speakerLocked = true;
+        log.info({ agentLabel }, "stream: speaker mapping locked (first speaker = agent)");
+      }
+      return dgSpeaker === agentLabel ? "agent" : "client";
+    };
+
     const send = (obj) => {
       if (socket.readyState === socket.OPEN) {
         socket.send(JSON.stringify(obj));
@@ -114,6 +141,9 @@ export default async function streamRoutes(app) {
         sendError("already_started", "Deepgram session already open");
         return;
       }
+      // Reset speaker mapping for new call
+      agentLabel = null;
+      speakerLocked = false;
       if (!apiKey) {
         log.warn("stream: start requested but DEEPGRAM_API_KEY is unset");
         sendError("no_api_key", "Server is missing DEEPGRAM_API_KEY");
@@ -129,15 +159,16 @@ export default async function streamRoutes(app) {
             // (broadcast or log). The test suite has an invariant that
             // verifies the broadcast frame is always post-redaction.
             const { redacted, counts } = redact(u.text);
+            const role = mapSpeaker(u.speaker);
             log.debug(
-              { redactionCounts: counts, len: redacted.length, speaker: u.speaker },
+              { redactionCounts: counts, len: redacted.length, speaker: role, dgSpeaker: u.speaker },
               "stream: utterance (redacted)"
             );
             send({
               type: "utterance",
               sessionId,
               final: true,
-              speaker: u.speaker,
+              speaker: role,
               text: redacted,
               ts: u.ts,
               redactionCounts: counts,
@@ -147,7 +178,7 @@ export default async function streamRoutes(app) {
             // through `send`, and any failure is logged inside.
             if (engine) {
               Promise.resolve(
-                engine.ingestUtterance({ speaker: u.speaker, text: redacted, ts: u.ts })
+                engine.ingestUtterance({ speaker: role, text: redacted, ts: Date.now() })
               ).catch((err) =>
                 log.warn({ err: err.message }, "stream: engine ingest failed")
               );
@@ -225,10 +256,43 @@ export default async function streamRoutes(app) {
           stopDeepgram("client-stop");
           return;
         case "lead_context":
-          // Client snapshot of the lead — drives Claude prompt context.
-          // We trust the client to redact PII it doesn't want sent;
-          // server-side redaction happens at the Deepgram boundary.
           if (engine) engine.setLead(msg.lead ?? null);
+          return;
+        case "script_state":
+          if (engine) engine.setScriptState(msg.state ?? null);
+          return;
+        case "call_timer":
+          if (engine && typeof msg.ms === "number") engine.setCallTimer(msg.ms);
+          return;
+        case "request_suggestion":
+          if (!engine) {
+            sendError("no_engine", "Suggestion engine unavailable — ANTHROPIC_API_KEY may be unset");
+            return;
+          }
+          Promise.resolve(engine.requestSuggestion()).catch((err) =>
+            log.warn({ err: err.message }, "stream: manual suggestion failed")
+          );
+          return;
+        case "recalibrate_speakers":
+          if (agentLabel === null) {
+            sendError("no_speakers", "No speaker mapping yet — start speaking first");
+            return;
+          }
+          agentLabel = agentLabel === 0 ? 1 : 0;
+          log.info({ agentLabel }, "stream: speaker mapping recalibrated");
+          send({ type: "speakers_recalibrated", sessionId, agentLabel });
+          return;
+        case "set_training_mode":
+          trainingMode = !!msg.enabled;
+          if (trainingMode) {
+            agentLabel = null;
+            speakerLocked = false;
+          }
+          log.info({ trainingMode }, "stream: training mode toggled");
+          return;
+        case "ptt_state":
+          pttSpeaking = !!msg.speaking;
+          log.debug({ pttSpeaking }, "stream: ptt state changed");
           return;
         case "bye":
           log.info("stream: client sent bye");

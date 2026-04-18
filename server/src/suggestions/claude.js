@@ -1,15 +1,15 @@
 /**
  * Claude Sonnet 4.6 streaming client for the suggestion engine.
  *
- * Given a trigger + lead context + recent transcript window, we ask
- * the model to fill in an `emit_suggestion` tool whose schema mirrors
- * AIResponseCard (src/data/aiResponses.js). The structured-tool path
- * is more reliable than free-form JSON for downstream rendering.
+ * Given a trigger + lead context + recent transcript window + script
+ * state + call timer, we ask the model to fill in an `emit_suggestion`
+ * tool whose v2 schema supports verbatim CMS disclosures, bridging
+ * phrases, alternates, and compliance reminders.
  *
  * Streaming events surface as callbacks:
  *   - onText(delta)              free-form text (rare, mostly ignored)
  *   - onJsonDelta(delta)         partial-JSON tokens for the suggestion tool
- *   - onComplete({ suggestion, usage }) parsed AIResponse + token-usage
+ *   - onComplete({ suggestion, usage }) parsed AIResponse v2 + token-usage
  *   - onError(err)
  *
  * Prompt-caching: the system prompt + compliance catalog are placed in
@@ -23,11 +23,18 @@ import Anthropic from "@anthropic-ai/sdk";
 
 export const COMPLIANCE_CATALOG = `
 CMS PECL (Pre-Enrollment Checklist) — required disclosures during a Medicare sales call:
-  - TPMO Disclaimer: "We do not offer every plan available in your area. Currently we represent X organizations which offer Y products in your area. Please contact Medicare.gov, 1-800-MEDICARE, or your local SHIP for help with all of your options."
+  - TPMO Disclaimer: "We do not offer every plan available in your area. Currently we represent [X] organizations which offer [Y] products in your area. Please contact Medicare.gov, 1-800-MEDICARE, or your local SHIP for help with all of your options."
   - Low-Income Subsidy (LIS / Extra Help): client may qualify for help paying drug costs.
   - Medicare Savings Programs (MSP): state programs that can help pay Part B premium based on income/assets.
   - Medigap rights: client's guaranteed-issue rights may be affected by enrolling in MA.
   - Scope of Appointment (SOA): must be obtained and on file before discussing specific plans.
+
+Required PECL verbatim scripts (MUST be delivered word-for-word when triggered):
+  - TPMO: "We do not offer every plan available in your area. Currently we represent [X] organizations which offer [Y] products in your area. Please contact Medicare.gov, 1-800-MEDICARE, or your local SHIP for help with all of your options."
+  - MSP: "Are you currently receiving help from the state to pay your Medicare premiums? Some state programs can help with your Part B premium if you have limited income and resources."
+  - LIS: "You may qualify for Extra Help, a federal program that helps cover prescription drug costs. Would you like me to check if you might be eligible?"
+  - Medigap: "I want to make sure you're aware — if you enroll in a Medicare Advantage plan, you may lose certain guaranteed-issue rights to purchase a Medigap policy later."
+  - SOA: "Before we discuss specific plan details, I need to confirm the scope of our appointment today."
 
 CMS marketing rules — never:
   - Describe a plan as "the best" or "the only option."
@@ -42,21 +49,62 @@ CMS marketing rules — never:
 export const SYSTEM_PROMPT = `
 You are MediCopilot, a real-time copilot whispering to a licensed Medicare insurance agent during a live sales call. The agent reads your guidance off-screen while talking to the client; there is no time for fluff or caveats.
 
-Your job: when the user message includes a trigger from the live transcript, emit ONE concise suggestion via the \`emit_suggestion\` tool. Never reply with free-form text — always call the tool.
+Your job: when the user message includes a trigger, emit ONE suggestion via the \`emit_suggestion\` tool. Never reply with free-form text — always call the tool.
 
-Voice + style:
-  - Address the agent in second person ("Mrs. Garcia just asked...").
-  - \`sayThis\` is the verbatim line the agent reads aloud — keep it natural, conversational, ≤60 words.
-  - \`pressMore\` is 1–3 follow-on talking points if the client wants more detail.
-  - \`followUps\` is 1–3 questions the agent can ask the client next.
-  - \`compliance\` is a one-liner reminder if the trigger touches a CMS rule (PECL / TPMO / MSP / SOA / Medigap). Omit if not applicable.
-  - \`sources\` is 0–3 short citations (plan name, CMS rule id, formulary tier).
-  - Never invent specific copays, plan IDs, or doctor network info you weren't given. If the lead context doesn't include it, say so and suggest pulling up the plan PDF.
+## Voice + style
 
-You will be given the full compliance catalog below; use it to populate the \`compliance\` field accurately.
+Write the way a warm, experienced agent actually speaks on the phone:
+  - Use the client's first name naturally (not every sentence).
+  - Use contractions ("you're", "we'll", "that's").
+  - Bridge into required disclosures smoothly — never abruptly switch topics.
+  - \`primary\` is the ONE best line the agent should say. Conversational, ≤60 words.
+  - \`sayThis\` is an alias for \`primary\` (legacy compat) — always set both to the same value.
+
+## When a verbatim CMS disclosure is needed
+
+If the trigger or script state indicates a required disclosure:
+  1. Set \`bridging_phrase\` — a natural, warm transition line the agent says BEFORE the verbatim text.
+  2. Set \`verbatim_next\` — the EXACT CMS-required text from the compliance catalog. Do NOT paraphrase.
+  3. Set \`primary\` to the bridging phrase (so the card always has a conversational top line).
+
+## Good vs. bad phrasing examples
+
+GOOD primary: "Maria, that's a great question about Eliquis coverage — let me pull up the plans in your area that include it."
+BAD primary: "The client has inquired about Eliquis coverage. Three plans in ZIP 33024 cover this medication."
+
+GOOD bridging_phrase: "Before we look at specific plans, there's one important thing I'm required to share with you —"
+BAD bridging_phrase: "TPMO disclaimer required. Reading now:"
+
+GOOD verbatim_next: "We do not offer every plan available in your area. Currently we represent [X] organizations..."
+BAD verbatim_next: "We don't offer all the plans in your area" (paraphrased — WRONG, must be exact)
+
+## Script state awareness
+
+You will receive the current script state showing which PECL items are covered, which are required next, and any overdue deadlines. Use this to:
+  - Proactively suggest the next required item when there's a natural conversational opening.
+  - Flag overdue items in \`compliance_reminder\`.
+  - When the client jumps to a topic that has an unmet prerequisite, use \`bridging_phrase\` + \`verbatim_next\` to cover the prerequisite before returning to the client's question.
+
+## Field reference
+
+  - \`primary\` / \`sayThis\`: the one best conversational line (≤60 words).
+  - \`bridging_phrase\`: warm transition into a verbatim disclosure (omit if no verbatim needed).
+  - \`verbatim_next\`: exact CMS-required text, word-for-word from the catalog (omit if no disclosure needed).
+  - \`alternates\`: 2–3 alternate phrasings of primary for different client reactions.
+  - \`compliance_reminder\`: amber-severity reminder if a required item is overdue. Always include the item name and deadline.
+  - \`followUps\`: 1–3 questions the agent can ask the client next.
+  - \`sources\`: 0–3 short citations (plan name, CMS rule, formulary tier).
+  - \`why\`: 1-sentence agent-facing explanation of why this suggestion was triggered.
+  - Never invent specific copays, plan IDs, or doctor network info you weren't given.
+
+## Speaker label resilience
+
+Speaker labels may be wrong — diarization on speakerphone is ~70-80% accurate. Use content to infer the real speaker: "I take [medication]" or "my doctor" = client. "I can help you with that" or "let me look that up" = agent. Trust content over labels when they conflict.
+
+You will be given the full compliance catalog below; use it to populate disclosures accurately.
 `.trim();
 
-/* ── Tool schema (mirrors AIResponseCard) ──────────────────────────── */
+/* ── Tool schema v2 ────────────────────────────────────────────────── */
 
 export const SUGGESTION_TOOL = {
   name: "emit_suggestion",
@@ -64,11 +112,34 @@ export const SUGGESTION_TOOL = {
     "Emit a single suggestion card for the agent. Always call this tool — never reply with free-form text.",
   input_schema: {
     type: "object",
-    required: ["sayThis"],
+    required: ["primary", "sayThis"],
     properties: {
+      primary: {
+        type: "string",
+        description: "The one best conversational line the agent reads aloud. ≤60 words.",
+      },
       sayThis: {
         type: "string",
-        description: "Verbatim line the agent reads aloud. ≤60 words, conversational.",
+        description: "Alias for primary (legacy compat). Set to the same value as primary.",
+      },
+      bridging_phrase: {
+        type: "string",
+        description: "Warm transition line before a verbatim disclosure. Omit if no disclosure needed.",
+      },
+      verbatim_next: {
+        type: "string",
+        description: "Exact CMS-required text, word-for-word. Must NOT be paraphrased. Omit if no disclosure needed.",
+      },
+      alternates: {
+        type: "array",
+        minItems: 2,
+        maxItems: 3,
+        items: { type: "string" },
+        description: "2–3 alternate phrasings of primary for different client reactions.",
+      },
+      compliance_reminder: {
+        type: "string",
+        description: "Amber-severity reminder if a required PECL item is overdue. Include item name and time context.",
       },
       pressMore: {
         type: "array",
@@ -92,6 +163,10 @@ export const SUGGESTION_TOOL = {
         type: "string",
         description: "One-line CMS reminder if the trigger touches a compliance rule. Omit if N/A.",
       },
+      why: {
+        type: "string",
+        description: "1-sentence agent-facing explanation of why this suggestion was triggered.",
+      },
     },
   },
 };
@@ -103,29 +178,55 @@ export const SUGGESTION_TOOL = {
  *
  * @param {Object} args
  * @param {{kind: string, summary: string, item?: any}} args.trigger
- * @param {Object} args.lead     lead-context snapshot
+ * @param {Object} args.lead           lead-context snapshot
  * @param {Array<{speaker: string, text: string, ts?: number}>} args.transcriptWindow
+ * @param {Object} [args.scriptState]  current script/PECL state
+ * @param {number} [args.callTimerMs]  elapsed call time in ms
  * @returns {string}
  */
-export function buildUserPrompt({ trigger, lead, transcriptWindow }) {
+export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs }) {
   const transcriptStr = (transcriptWindow ?? [])
     .map((u) => `${u.speaker}: ${u.text}`)
     .join("\n");
   const leadStr = lead ? JSON.stringify(lead, null, 2) : "(no lead context yet)";
-  return [
+
+  const parts = [
     `Trigger: ${trigger.kind} — ${trigger.summary}`,
     trigger.item ? `Trigger payload: ${JSON.stringify(trigger.item)}` : "",
     "",
     "Lead context:",
     leadStr,
+  ];
+
+  if (scriptState) {
+    parts.push("", "Script state (PECL checklist):");
+    const { covered, requiredNext, overdueItems } = scriptState;
+    if (covered && covered.length > 0) {
+      parts.push(`  Covered: ${covered.join(", ")}`);
+    }
+    if (requiredNext) {
+      parts.push(`  Required next: ${requiredNext}`);
+    }
+    if (overdueItems && overdueItems.length > 0) {
+      parts.push(`  OVERDUE: ${overdueItems.join(", ")}`);
+    }
+  }
+
+  if (callTimerMs != null) {
+    const mins = Math.floor(callTimerMs / 60000);
+    const secs = Math.floor((callTimerMs % 60000) / 1000);
+    parts.push("", `Call timer: ${mins}m ${secs}s`);
+  }
+
+  parts.push(
     "",
     "Recent transcript (last ~120s):",
     transcriptStr || "(no transcript yet)",
     "",
     "Emit one suggestion via the emit_suggestion tool.",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  );
+
+  return parts.filter(Boolean).join("\n");
 }
 
 /* ── Streaming entry point ─────────────────────────────────────────── */
@@ -135,6 +236,8 @@ export function buildUserPrompt({ trigger, lead, transcriptWindow }) {
  * @property {{kind: string, summary: string, item?: any}} trigger
  * @property {Object|null} lead
  * @property {Array<{speaker: string, text: string, ts?: number}>} transcriptWindow
+ * @property {Object} [scriptState]
+ * @property {number} [callTimerMs]
  * @property {(delta: string) => void} [onText]
  * @property {(delta: string) => void} [onJsonDelta]
  * @property {(payload: { suggestion: any, usage?: any, kind: string }) => void} [onComplete]
@@ -143,28 +246,24 @@ export function buildUserPrompt({ trigger, lead, transcriptWindow }) {
 
 /**
  * Stream a single suggestion. Returns a Promise that resolves once the
- * stream is fully consumed (or rejects on a fatal error). The
- * `onJsonDelta` callback is the hot path — every partial-JSON token
- * for the tool input lands there.
+ * stream is fully consumed (or rejects on a fatal error).
  *
  * @param {Object} deps
- * @param {Anthropic|object} deps.client          injectable Anthropic client (tests pass a stub)
- * @param {string} deps.model                     e.g. "claude-sonnet-4-6"
+ * @param {Anthropic|object} deps.client
+ * @param {string} deps.model
  * @param {import("pino").Logger} [deps.log]
  * @param {SuggestionParams} params
  * @returns {Promise<{ suggestion: any, usage?: any, kind: string }>}
  */
 export async function streamSuggestion(
   { client, model, log },
-  { trigger, lead, transcriptWindow, onText, onJsonDelta, onComplete, onError }
+  { trigger, lead, transcriptWindow, scriptState, callTimerMs, onText, onJsonDelta, onComplete, onError }
 ) {
-  const userPrompt = buildUserPrompt({ trigger, lead, transcriptWindow });
+  const userPrompt = buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs });
 
   const requestBody = {
     model,
     max_tokens: 1024,
-    // System prompt + compliance catalog go in a cache_control block so
-    // repeated suggestion calls in the same call session hit the cache.
     system: [
       {
         type: "text",
@@ -211,8 +310,6 @@ export async function streamSuggestion(
         }
         case "message_stop":
           break;
-        // content_block_start / content_block_stop / message_start —
-        // not interesting for our use case, ignore.
       }
     }
   } catch (err) {
@@ -221,9 +318,6 @@ export async function streamSuggestion(
     throw err;
   }
 
-  // Prefer the final-message accessor when the SDK exposes it — it
-  // gives us a fully-parsed tool input even if our delta buffer
-  // missed something at the boundaries.
   let suggestion;
   try {
     if (typeof stream.finalMessage === "function") {
