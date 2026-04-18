@@ -18,6 +18,23 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const dataDir = resolve(__dirname, "../../data/compliance");
+
+/* ── CMS call flow + coaching rules (loaded once at boot) ─────────── */
+
+export const CALL_FLOW = JSON.parse(
+  readFileSync(resolve(dataDir, "call-flow.json"), "utf-8"),
+);
+
+export const COACHING_RULES = readFileSync(
+  resolve(dataDir, "coaching-rules.md"),
+  "utf-8",
+).trim();
 
 /* ── Compliance catalog (cached) ───────────────────────────────────── */
 
@@ -167,6 +184,10 @@ export const SUGGESTION_TOOL = {
         type: "string",
         description: "1-sentence agent-facing explanation of why this suggestion was triggered.",
       },
+      call_stage: {
+        type: "string",
+        description: "Detected current call flow stage ID (e.g. 'tpmo_disclosure', 'neads_analysis'). Set when you detect a stage transition from the transcript.",
+      },
     },
   },
 };
@@ -184,7 +205,7 @@ export const SUGGESTION_TOOL = {
  * @param {number} [args.callTimerMs]  elapsed call time in ms
  * @returns {string}
  */
-export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext }) {
+export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext, callStage }) {
   const transcriptStr = (transcriptWindow ?? [])
     .map((u) => `${u.speaker}: ${u.text}`)
     .join("\n");
@@ -236,6 +257,10 @@ export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, 
     parts.push("", `Call timer: ${mins}m ${secs}s`);
   }
 
+  if (callStage) {
+    parts.push("", `Current call flow stage: ${callStage}`);
+  }
+
   parts.push(
     "",
     "Recent transcript (last ~120s):",
@@ -276,9 +301,9 @@ export function buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, 
  */
 export async function streamSuggestion(
   { client, model, log },
-  { trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext, onText, onJsonDelta, onComplete, onError }
+  { trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext, callStage, onText, onJsonDelta, onComplete, onError }
 ) {
-  const userPrompt = buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext });
+  const userPrompt = buildUserPrompt({ trigger, lead, transcriptWindow, scriptState, callTimerMs, trainingContext, callStage });
 
   const requestBody = {
     model,
@@ -287,6 +312,11 @@ export async function streamSuggestion(
       {
         type: "text",
         text: `${SYSTEM_PROMPT}\n\nCompliance catalog:\n${COMPLIANCE_CATALOG}`,
+        cache_control: { type: "ephemeral" },
+      },
+      {
+        type: "text",
+        text: `CMS Telephonic Sales Call Flow (PY2026):\n${JSON.stringify(CALL_FLOW)}\n\n${COACHING_RULES}`,
         cache_control: { type: "ephemeral" },
       },
     ],
