@@ -332,20 +332,24 @@ function liveSuggestionsToCards(suggestions) {
     .filter((s) => s.status === "done" && s.suggestion)
     .map((s) => {
       const ai = s.suggestion;
-      const primary = ai.primary || ai.sayThis;
+      const sayThis = ai.say_this || ai.primary || ai.sayThis;
       return {
         trigger: `Live · ${s.kind}`,
         context: { screen: "Live", audio: `Live trigger: ${s.kind}` },
-        response: primary,
-        sayThis: primary,
-        primary,
+        response: sayThis,
+        sayThis,
+        primary: sayThis,
+        acknowledgment: ai.acknowledgment || null,
+        verbatim_text: ai.verbatim_text || ai.verbatim_next || null,
+        severity: ai.severity || null,
+        reasoning: ai.reasoning || ai.why || null,
         bridging_phrase: ai.bridging_phrase || null,
         verbatim_next: ai.verbatim_next || null,
         alternates: ai.alternates || [],
         compliance_reminder: ai.compliance_reminder || null,
         why: ai.why || null,
         pressMore: ai.pressMore || [],
-        followUps: ai.followUps || [],
+        followUps: ai.follow_ups || ai.followUps || [],
         compliance: ai.compliance,
         sources: ai.sources,
       };
@@ -2698,6 +2702,23 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           {screenOn && <span style={{ fontFamily: T.mono, fontSize: 8, color: `rgba(${T.tealRgb},0.5)`, background: `rgba(${T.tealRgb},0.06)`, padding: "1px 5px", borderRadius: 3 }}>🖥 screen</span>}
         </div>
 
+        {/* ── Severity badge (top-right) + Acknowledgment (top) ── */}
+        {(resp.acknowledgment || resp.severity) && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            {resp.acknowledgment && (
+              <div style={{ fontFamily: T.body, fontStyle: "italic", fontSize: scaledFont(11), color: "rgba(255,255,255,0.5)", lineHeight: 1.4 }}>{resp.acknowledgment}</div>
+            )}
+            <div style={{ flex: 1 }} />
+            {resp.severity && (() => {
+              const colors = { BLOCK: "#EF4444", URGENT: "#F59E0B", WARN: "#F59E0B", INFO: T.teal };
+              const bg = { BLOCK: "rgba(239,68,68,0.15)", URGENT: "rgba(245,158,11,0.15)", WARN: "rgba(245,158,11,0.10)", INFO: `rgba(${T.tealRgb},0.10)` };
+              return (
+                <span style={{ fontFamily: T.display, fontSize: 8, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", padding: "2px 7px", borderRadius: 10, color: colors[resp.severity] || T.teal, background: bg[resp.severity] || bg.INFO, border: `1px solid ${colors[resp.severity] || T.teal}33` }}>{resp.severity}</span>
+              );
+            })()}
+          </div>
+        )}
+
         {/* ── Say this: ── */}
         <div style={{ marginBottom: 10, background: `rgba(${T.tealRgb},0.09)`, border: `1px solid rgba(${T.tealRgb},0.28)`, borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0", padding: "10px 12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
@@ -2729,8 +2750,16 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           <div style={{ fontFamily: T.body, fontSize: scaledFont(13), lineHeight: 1.65, color: "rgba(255,255,255,0.92)", whiteSpace: "pre-wrap" }}>{augmentedSayThis}</div>
         </div>
 
+        {/* ── Verbatim CMS text (only when populated) ── */}
+        {resp.verbatim_text && (
+          <div style={{ marginBottom: 10, background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.20)", borderRadius: 8, padding: "10px 12px" }}>
+            <div style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "#F5A623", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>Read verbatim:</div>
+            <div style={{ fontFamily: T.mono, fontSize: scaledFont(11), lineHeight: 1.65, color: "rgba(255,255,255,0.85)", whiteSpace: "pre-wrap", background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, padding: "8px 10px" }}>{resp.verbatim_text}</div>
+          </div>
+        )}
+
         {/* ── If they press more: ── */}
-        {resp.pressMore && (
+        {resp.pressMore && resp.pressMore.length > 0 && (
           <div style={{ marginBottom: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 8, padding: "8px 12px" }}>
             <div style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.38)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7 }}>If they press more, add this:</div>
             {resp.pressMore.map((point, i) => (
@@ -2743,7 +2772,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         )}
 
         {/* ── Follow-up questions: ── */}
-        {resp.followUps && (
+        {resp.followUps && resp.followUps.length > 0 && (
           <div style={{ marginBottom: 10, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 8, padding: "8px 12px" }}>
             <div style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 7 }}>Follow-up questions:</div>
             {resp.followUps.map((q, i) => (
@@ -2756,10 +2785,10 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         )}
 
         {/* ── Compliance note ── */}
-        {resp.compliance && (
+        {(resp.compliance || resp.compliance_reminder) && (
           <div style={{ display: "flex", gap: 6, padding: "6px 8px", background: "rgba(245,166,35,0.06)", border: "1px solid rgba(245,166,35,0.14)", borderRadius: 6, marginBottom: 8 }}>
             <Shield size={10} color="#F5A623" style={{ flexShrink: 0, marginTop: 1 }} />
-            <span style={{ fontFamily: T.body, fontSize: scaledFont(10), color: "rgba(255,255,255,0.5)", lineHeight: 1.4 }}>{resp.compliance}</span>
+            <span style={{ fontFamily: T.body, fontSize: scaledFont(10), color: "rgba(255,255,255,0.5)", lineHeight: 1.4 }}>{resp.compliance_reminder || resp.compliance}</span>
           </div>
         )}
 
@@ -2912,7 +2941,10 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
               "{latestTranscriptText.slice(0, 65)}{latestTranscriptText.length > 65 ? "..." : ""}"
             </span>
           </div>
-          {/* Say this: preview */}
+          {/* Acknowledgment + Say this: preview */}
+          {latestResp.acknowledgment && (
+            <div style={{ fontFamily: T.body, fontStyle: "italic", fontSize: scaledFont(10), color: "rgba(255,255,255,0.45)", marginBottom: 4, paddingLeft: 2 }}>{latestResp.acknowledgment}</div>
+          )}
           <div style={{ background: `rgba(${T.tealRgb},0.09)`, border: `1px solid rgba(${T.tealRgb},0.25)`, borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0", padding: "8px 10px" }}>
             <div style={{ fontFamily: T.display, fontSize: 8, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Say this:</div>
             <div style={{ fontFamily: T.body, fontSize: scaledFont(12), color: `rgba(255,255,255,${Math.min(opacity + 0.1, 0.95)})`, lineHeight: 1.55 }}>{latestResp.sayThis}</div>
@@ -3390,20 +3422,20 @@ export default function MacOSDesktopMockup() {
   const [showFeedback, setShowFeedback] = useState(false);
   const prevCallState = useRef(call.state);
 
-  // Show scenario picker when training mode is activated and no scenario selected
+  // Show scenario picker when training mode is activated and no session started
   useEffect(() => {
-    if (training.active && trainingCtx.testerName && !trainingCtx.scenario && call.state === "idle") {
+    if (training.active && trainingCtx.testerName && !trainingCtx.session && call.state === "idle") {
       setShowScenarioPicker(true);
     }
-  }, [training.active, trainingCtx.testerName, trainingCtx.scenario, call.state]);
+  }, [training.active, trainingCtx.testerName, trainingCtx.session, call.state]);
 
   // Show feedback modal when call ends during training
   useEffect(() => {
-    if (prevCallState.current === "active" && call.state === "ended" && training.active && trainingCtx.scenario) {
+    if (prevCallState.current === "active" && call.state === "ended" && training.active && trainingCtx.session) {
       setShowFeedback(true);
     }
     prevCallState.current = call.state;
-  }, [call.state, training.active, trainingCtx.scenario]);
+  }, [call.state, training.active, trainingCtx.session]);
 
   const handleScenarioSelect = async (scenario) => {
     setShowScenarioPicker(false);
