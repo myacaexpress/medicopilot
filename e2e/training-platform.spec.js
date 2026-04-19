@@ -115,7 +115,7 @@ test.describe("training platform — tester flow", () => {
 
     // Start call
     await page.getByRole("button", { name: /Start Call/i }).first().click();
-    await expect(page.getByText(/CONNECTED/i).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /End Call/i }).first()).toBeVisible();
 
     // Training notes panel should be visible
     await expect(page.getByTestId("training-notes-panel")).toBeVisible();
