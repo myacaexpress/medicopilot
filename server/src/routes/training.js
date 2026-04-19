@@ -91,17 +91,19 @@ export default async function trainingRoutes(app) {
 
   app.post("/api/training/sessions", async (req, reply) => {
     const { scenario_id, tester_name, master_prompt_version } = req.body || {};
-    if (!scenario_id || !tester_name) {
-      return reply.code(400).send({ error: "scenario_id and tester_name required" });
+    if (!tester_name) {
+      return reply.code(400).send({ error: "tester_name required" });
     }
-    const scenario = await getScenarioById(scenario_id);
-    if (!scenario) {
-      return reply.code(404).send({ error: "Scenario not found" });
+    if (scenario_id) {
+      const scenario = await getScenarioById(scenario_id);
+      if (!scenario) {
+        return reply.code(404).send({ error: "Scenario not found" });
+      }
     }
     const { rows } = await query(
       `INSERT INTO training_sessions (scenario_id, tester_name, master_prompt_version)
        VALUES ($1, $2, $3) RETURNING *`,
-      [scenario_id, tester_name, master_prompt_version || null]
+      [scenario_id || null, tester_name, master_prompt_version || null]
     );
     reply.code(201);
     return rows[0];
@@ -167,7 +169,7 @@ export default async function trainingRoutes(app) {
 
     let sql = `SELECT s.*, sc.title AS scenario_title, sc.difficulty
                FROM training_sessions s
-               JOIN training_scenarios sc ON sc.id = s.scenario_id`;
+               LEFT JOIN training_scenarios sc ON sc.id = s.scenario_id`;
     const params = [];
     if (scenario_id) {
       sql += ` WHERE s.scenario_id = $1`;
@@ -186,7 +188,7 @@ export default async function trainingRoutes(app) {
       `SELECT s.*, sc.title AS scenario_title, sc.difficulty, sc.persona_name,
               sc.situation, sc.success_criteria, sc.hidden_curveball
        FROM training_sessions s
-       JOIN training_scenarios sc ON sc.id = s.scenario_id
+       LEFT JOIN training_scenarios sc ON sc.id = s.scenario_id
        WHERE s.id = $1`,
       [id]
     );
@@ -226,20 +228,20 @@ export default async function trainingRoutes(app) {
       FROM training_sessions
     `);
     const byDifficulty = await query(`
-      SELECT sc.difficulty,
+      SELECT COALESCE(sc.difficulty, 'free') AS difficulty,
         count(*)::int AS sessions,
         round(avg(s.rating), 2)::float AS avg_rating
       FROM training_sessions s
-      JOIN training_scenarios sc ON sc.id = s.scenario_id
-      GROUP BY sc.difficulty
-      ORDER BY sc.difficulty
+      LEFT JOIN training_scenarios sc ON sc.id = s.scenario_id
+      GROUP BY COALESCE(sc.difficulty, 'free')
+      ORDER BY difficulty
     `);
     const byScenario = await query(`
-      SELECT s.scenario_id, sc.title,
+      SELECT s.scenario_id, COALESCE(sc.title, 'Free Practice') AS title,
         count(*)::int AS sessions,
         round(avg(s.rating), 2)::float AS avg_rating
       FROM training_sessions s
-      JOIN training_scenarios sc ON sc.id = s.scenario_id
+      LEFT JOIN training_scenarios sc ON sc.id = s.scenario_id
       GROUP BY s.scenario_id, sc.title
       ORDER BY sessions DESC
       LIMIT 10

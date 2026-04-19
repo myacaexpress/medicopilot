@@ -36,7 +36,7 @@ export function fetchScenarios() {
 export function createSession(scenario_id, tester_name) {
   return apiFetch("/api/training/sessions", {
     method: "POST",
-    body: JSON.stringify({ scenario_id, tester_name }),
+    body: JSON.stringify({ scenario_id: scenario_id || null, tester_name }),
   });
 }
 

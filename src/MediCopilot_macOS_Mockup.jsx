@@ -1804,15 +1804,16 @@ function MobileLayout() {
     if (call.state === "idle" || !call.startedAt) { setElapsedMs(0); return undefined; }
     if (call.state === "ended" && call.endedAt) { setElapsedMs(call.endedAt - call.startedAt); return undefined; }
     setElapsedMs(Date.now() - call.startedAt);
-    const id = setInterval(() => { setElapsedMs(Date.now() - call.startedAt); }, 30_000);
+    const id = setInterval(() => { setElapsedMs(Date.now() - call.startedAt); }, 1_000);
     return () => clearInterval(id);
   }, [call.state, call.startedAt, call.endedAt]);
 
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
+  const trainingFresh = training.active && callActive;
   const renderedTranscript = usingLive
     ? liveLines
-    : transcriptLines.slice(0, visibleTranscript);
+    : trainingFresh ? [] : transcriptLines.slice(0, visibleTranscript);
   const liveCards = liveSuggestionsToCards(liveAudio.suggestions);
 
   useEffect(() => {
@@ -1820,11 +1821,13 @@ function MobileLayout() {
     return () => clearInterval(iv);
   }, []);
 
-  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
+  const peclItems = trainingFresh
+    ? DEFAULT_PECL_ITEMS.map(i => ({ ...i, done: false }))
+    : mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
   const peclDone = peclItems.filter(i => i.done).length;
   const displayResponses = liveCards.length > 0
     ? liveCards
-    : aiResponses.slice(0, shownResponses);
+    : trainingFresh ? [] : aiResponses.slice(0, shownResponses);
 
   // The "active card" is the most recent one displayed — that's what an
   // MSP-script click attaches to. When the active card identity changes
@@ -2428,7 +2431,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     setElapsedMs(Date.now() - call.startedAt);
     const id = setInterval(() => {
       setElapsedMs(Date.now() - call.startedAt);
-    }, 30_000);
+    }, 1_000);
     return () => clearInterval(id);
   }, [call.state, call.startedAt, call.endedAt]);
 
@@ -2471,12 +2474,13 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   useLeadContextPush(liveAudio, ctxLead);
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
+  const trainingFresh = training.active && callActive;
   const renderedTranscript = usingLive
     ? liveLines
-    : transcriptLines.slice(0, visibleTranscript);
+    : trainingFresh ? [] : transcriptLines.slice(0, visibleTranscript);
   const latestTranscriptText = usingLive
     ? liveLines[liveLines.length - 1].text
-    : transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text;
+    : trainingFresh ? "" : transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text;
   const liveCards = liveSuggestionsToCards(liveAudio.suggestions);
   const collapsed = useDraggable(620, 55);
   const expanded = useDraggable(640, 30);
@@ -2512,7 +2516,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
   }, []);
 
-  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
+  const peclItems = trainingFresh
+    ? DEFAULT_PECL_ITEMS.map(i => ({ ...i, done: false }))
+    : mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
   const peclDone = peclItems.filter(i => i.done).length;
   const mspCovered = peclItems.find(i => i.id === "msp")?.done === true;
   const mspBadge = mspBadgeMode({ elapsedMs, mspCovered });
@@ -2661,7 +2667,19 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const renderDesktopCopilot = () => {
     const resp = liveCards.length > 0
       ? liveCards[liveCards.length - 1]
-      : aiResponses[shownResponses - 1];
+      : trainingFresh ? null : aiResponses[shownResponses - 1];
+    if (!resp) {
+      return (
+        <div>
+          <LeadContextPanel scaledFont={scaledFont} />
+          <div style={{ padding: "40px 14px", textAlign: "center" }}>
+            <div style={{ fontFamily: T.body, fontSize: scaledFont(13), color: "rgba(255,255,255,0.35)", lineHeight: 1.6 }}>
+              Coaching suggestions will appear here once the conversation starts.
+            </div>
+          </div>
+        </div>
+      );
+    }
     // Each pill carries a `field` identifier that maps back to a LeadContext
     // field name. Hovering the pill highlights the matching cell in
     // LeadContextPanel (spec §A3). When no underlying lead field applies
@@ -2891,7 +2909,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   if (mode === "collapsed") {
     const latestResp = liveCards.length > 0
       ? liveCards[liveCards.length - 1]
-      : aiResponses[shownResponses - 1];
+      : trainingFresh ? null : aiResponses[shownResponses - 1];
     return (
       <div onMouseDown={collapsed.onMouseDown} style={{
         position: "absolute", left: collapsed.pos.x, top: collapsed.pos.y,
@@ -2934,6 +2952,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
         {/* Scrollable content */}
         <div data-no-drag="true" style={{ flex: 1, overflowY: "auto", padding: "0 12px 6px", cursor: "default" }}>
+          {latestResp ? (<>
           {/* Transcript snippet */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", marginBottom: 6, background: "rgba(255,255,255,0.03)", borderRadius: 6, borderLeft: `2px solid rgba(${T.greenRgb},0.4)` }}>
             <Volume2 size={10} color="rgba(255,255,255,0.3)" />
@@ -2949,6 +2968,11 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             <div style={{ fontFamily: T.display, fontSize: 8, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Say this:</div>
             <div style={{ fontFamily: T.body, fontSize: scaledFont(12), color: `rgba(255,255,255,${Math.min(opacity + 0.1, 0.95)})`, lineHeight: 1.55 }}>{latestResp.sayThis}</div>
           </div>
+          </>) : (
+          <div style={{ padding: "20px 8px", textAlign: "center", fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.3)" }}>
+            Waiting for conversation...
+          </div>
+          )}
         </div>
 
         {/* Input bar */}
