@@ -1839,7 +1839,7 @@ function MobileLayout() {
 
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
-  const trainingFresh = training.active && callActive;
+  const trainingFresh = training.active;
   const renderedTranscript = usingLive
     ? liveLines
     : trainingFresh ? [] : transcriptLines.slice(0, visibleTranscript);
@@ -2019,7 +2019,7 @@ function MobileLayout() {
         />
         );
       })}
-      {liveCards.length === 0 && shownResponses < aiResponses.length && (
+      {liveCards.length === 0 && !training.active && shownResponses < aiResponses.length && (
         <div style={{ textAlign: "center", padding: "12px 0" }}>
           <span style={{ fontFamily: T.display, fontSize: 11, color: "rgba(255,255,255,0.2)" }}>
             Tap "Ask AI" for next response...
@@ -2518,7 +2518,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   useLeadContextPush(liveAudio, ctxLead);
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
-  const trainingFresh = training.active && callActive;
+  const trainingFresh = training.active;
   const renderedTranscript = usingLive
     ? liveLines
     : trainingFresh ? [] : transcriptLines.slice(0, visibleTranscript);
@@ -2868,7 +2868,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         <SourcesRow sources={sources} />
 
         {/* Response counter — only visible in demo mode */}
-        {!BACKEND_WSS_URL && (
+        {!BACKEND_WSS_URL && !training.active && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>{shownResponses} / {aiResponses.length} responses</span>
           {shownResponses < aiResponses.length && (
