@@ -1127,19 +1127,36 @@ function EditableLeadCell({ field, editable, highlighted, scaledFont, onCommit }
 
 function LeadContextPanel({ scaledFont = (x) => x }) {
   const T = useTheme();
-  const { lead: ctxLead, highlightedField, actions } = useLead();
+  const { lead: ctxLead, highlightedField, actions, training } = useLead();
+  const trainingCtx = useTraining();
   const [activeId, setActiveId] = useState("maria");
   const [showSwitch, setShowSwitch] = useState(false);
   const [showCapture, setShowCapture] = useState(false);
 
+  const isTraining = training.active;
+  const scenario = trainingCtx.scenario;
+
   // If we have a real lead from context, display it; otherwise fall back to mock data
   const hasRealLead = ctxLead && ctxLead.fields;
+
+  // In training mode, build lead from scenario persona or show empty state
+  const trainingLead = isTraining ? (scenario ? {
+    id: "training",
+    source: scenario.title || scenario.persona_name,
+    fields: [
+      scenario.persona_name && { k: "Name", v: scenario.persona_name },
+      scenario.persona_age && { k: "Age", v: `${scenario.persona_age}` },
+      scenario.persona_state && { k: "State", v: scenario.persona_state },
+      scenario.medications?.length > 0 && { k: "Medications", v: scenario.medications.join(", "), wide: true },
+      scenario.situation && { k: "Situation", v: scenario.situation, wide: true },
+    ].filter(Boolean),
+  } : null) : null;
 
   // Convert context lead fields to the display format the panel expects.
   // Each cell carries a `matches` array that lists the underlying fieldName(s)
   // it represents — used to decide whether the highlight ring should fire when
   // an AI source pill hovers a field name.
-  const active = hasRealLead ? {
+  const active = isTraining ? trainingLead : hasRealLead ? {
     id: ctxLead.id,
     source: `Captured · ${ctxLead.source}`,
     fields: [
@@ -1184,8 +1201,10 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
     ].filter(Boolean),
   } : MOCK_LEADS[activeId];
 
-  const fields = active.fields;
-  const source = active.source;
+  const fields = active?.fields || [];
+  const source = isTraining
+    ? (scenario ? scenario.title || scenario.persona_name : "Training")
+    : (active?.source || MOCK_LEADS[activeId].source);
 
   const handleCommitCapture = (extracted) => {
     // Build a real LeadContext from the extracted fields and dispatch to global state
@@ -1205,14 +1224,17 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
         <User size={11} color={T.teal} />
         <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(255,255,255,0.7)" }}>Lead context</span>
         <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.3)" }}>· {source}</span>
-        <span style={{
-          display: "inline-flex", alignItems: "center", gap: 4,
-          fontFamily: T.display, fontWeight: 600, fontSize: 9,
-          color: T.green, letterSpacing: "0.06em", textTransform: "uppercase", marginLeft: 6,
-        }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green, boxShadow: `0 0 6px rgba(${T.greenRgb},0.7)` }} />
-          Ready
-        </span>
+        {!isTraining && (
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 4,
+            fontFamily: T.display, fontWeight: 600, fontSize: 9,
+            color: T.green, letterSpacing: "0.06em", textTransform: "uppercase", marginLeft: 6,
+          }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green, boxShadow: `0 0 6px rgba(${T.greenRgb},0.7)` }} />
+            Ready
+          </span>
+        )}
+        {!isTraining && (
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
           <button data-no-drag="true" onClick={() => setShowSwitch(true)} style={{
             fontFamily: T.display, fontWeight: 700, fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase",
@@ -1227,14 +1249,16 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
             border: "1px solid rgba(255,255,255,0.08)",
           }}>⊕ Capture Lead</button>
         </div>
+        )}
       </div>
+      {fields.length > 0 ? (
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px 8px" }}>
         {fields.map((f, i) => (
           <EditableLeadCell
             key={i}
             field={f}
-            editable={hasRealLead}
-            highlighted={hasRealLead && f.matches && highlightedField && f.matches.includes(highlightedField)}
+            editable={hasRealLead && !isTraining}
+            highlighted={hasRealLead && !isTraining && f.matches && highlightedField && f.matches.includes(highlightedField)}
             scaledFont={scaledFont}
             onCommit={(nextValue) => {
               if (!hasRealLead) return;
@@ -1243,6 +1267,11 @@ function LeadContextPanel({ scaledFont = (x) => x }) {
           />
         ))}
       </div>
+      ) : isTraining ? (
+        <div style={{ padding: "12px 0", textAlign: "center", fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.35)" }}>
+          No lead captured — start the conversation first
+        </div>
+      ) : null}
 
       {showSwitch && (
         <SwitchLeadModal
@@ -1528,7 +1557,7 @@ function MacDock() {
   );
 }
 
-function Five9Window({ callState = "idle", onStartCall, onEndCall }) {
+function Five9Window({ callState = "idle", onStartCall, onEndCall, elapsedMs = 0 }) {
   const isActive = callState === "active";
   const isEnded = callState === "ended";
   const statusLabel = isActive ? "CONNECTED" : isEnded ? "CALL ENDED" : "READY";
@@ -1564,7 +1593,7 @@ function Five9Window({ callState = "idle", onStartCall, onEndCall }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
           <div style={{ width: 10, height: 10, borderRadius: 5, background: statusDot, boxShadow: statusGlow }} />
           <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16, color: statusColor }}>{statusLabel}</span>
-          <span style={{ fontFamily: T.mono, fontSize: 14, color: T.dusk }}>{isActive ? "08:12" : "00:00"}</span>
+          <span style={{ fontFamily: T.mono, fontSize: 14, color: T.dusk }}>{formatElapsed(elapsedMs)}</span>
           <span style={{ fontFamily: T.mono, fontSize: 13, color: "#666", marginLeft: "auto" }}>Campaign: AEP_MAPD_FL</span>
         </div>
         <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: 16, marginBottom: 16 }}>
@@ -1804,15 +1833,16 @@ function MobileLayout() {
     if (call.state === "idle" || !call.startedAt) { setElapsedMs(0); return undefined; }
     if (call.state === "ended" && call.endedAt) { setElapsedMs(call.endedAt - call.startedAt); return undefined; }
     setElapsedMs(Date.now() - call.startedAt);
-    const id = setInterval(() => { setElapsedMs(Date.now() - call.startedAt); }, 30_000);
+    const id = setInterval(() => { setElapsedMs(Date.now() - call.startedAt); }, 1_000);
     return () => clearInterval(id);
   }, [call.state, call.startedAt, call.endedAt]);
 
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
+  const trainingFresh = training.active;
   const renderedTranscript = usingLive
     ? liveLines
-    : transcriptLines.slice(0, visibleTranscript);
+    : trainingFresh ? [] : transcriptLines.slice(0, visibleTranscript);
   const liveCards = liveSuggestionsToCards(liveAudio.suggestions);
 
   useEffect(() => {
@@ -1820,11 +1850,13 @@ function MobileLayout() {
     return () => clearInterval(iv);
   }, []);
 
-  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
+  const peclItems = trainingFresh
+    ? DEFAULT_PECL_ITEMS.map(i => ({ ...i, done: false }))
+    : mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
   const peclDone = peclItems.filter(i => i.done).length;
   const displayResponses = liveCards.length > 0
     ? liveCards
-    : aiResponses.slice(0, shownResponses);
+    : trainingFresh ? [] : aiResponses.slice(0, shownResponses);
 
   // The "active card" is the most recent one displayed — that's what an
   // MSP-script click attaches to. When the active card identity changes
@@ -1894,17 +1926,27 @@ function MobileLayout() {
   };
 
   // ─── Panel content renderers ───
+  const trainingCtxMobileCallInfo = trainingCtxMobile;
+  const mobileCallInfoScenario = trainingCtxMobileCallInfo.scenario;
+  const mobileCallInfoFields = training.active
+    ? (mobileCallInfoScenario
+      ? [["Caller", mobileCallInfoScenario.persona_name], mobileCallInfoScenario.persona_age && ["Age", `${mobileCallInfoScenario.persona_age}`], mobileCallInfoScenario.persona_state && ["State", mobileCallInfoScenario.persona_state], mobileCallInfoScenario.medications?.length > 0 && ["Medications", mobileCallInfoScenario.medications.join(", ")]].filter(Boolean)
+      : [])
+    : [["Caller","Maria Garcia"],["Phone","(954) 555-0142"],["ZIP","33024 — Pembroke Pines, FL"],["DOB","03/15/1952 (Age 74)"],["Coverage","Original Medicare + PDP"],["Lead Source","AllCalls"]];
+
   const renderCallInfo = () => (
     <div style={{ padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-        <div style={{ width: 10, height: 10, borderRadius: 5, background: T.green, boxShadow: `0 0 8px rgba(${T.greenRgb},0.5)` }} />
-        <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16, color: T.green }}>CONNECTED</span>
-        <span style={{ fontFamily: T.mono, fontSize: 14, color: T.dusk }}>08:12</span>
+        <div style={{ width: 10, height: 10, borderRadius: 5, background: callActive ? T.green : callEnded ? "#E74C3C" : "rgba(255,255,255,0.35)", boxShadow: callActive ? `0 0 8px rgba(${T.greenRgb},0.5)` : "none" }} />
+        <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 16, color: callActive ? T.green : callEnded ? "#ff8a7b" : "rgba(255,255,255,0.45)" }}>{callActive ? "CONNECTED" : callEnded ? "CALL ENDED" : "READY"}</span>
+        <span style={{ fontFamily: T.mono, fontSize: 14, color: T.dusk }}>{formatElapsed(elapsedMs)}</span>
       </div>
-      <div style={{ fontFamily: T.mono, fontSize: 11, color: "#666", marginBottom: 16 }}>Campaign: AEP_MAPD_FL</div>
+      {!training.active && <div style={{ fontFamily: T.mono, fontSize: 11, color: "#666", marginBottom: 16 }}>Campaign: AEP_MAPD_FL</div>}
+      {training.active && mobileCallInfoScenario && <div style={{ fontFamily: T.mono, fontSize: 11, color: TRAINING_THEME.primary, marginBottom: 16 }}>{mobileCallInfoScenario.title || mobileCallInfoScenario.persona_name}</div>}
+      {mobileCallInfoFields.length > 0 ? (
       <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: 16, marginBottom: 16 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          {[["Caller","Maria Garcia"],["Phone","(954) 555-0142"],["ZIP","33024 — Pembroke Pines, FL"],["DOB","03/15/1952 (Age 74)"],["Coverage","Original Medicare + PDP"],["Lead Source","AllCalls"]].map(([k,v]) => (
+          {mobileCallInfoFields.map(([k,v]) => (
             <div key={k}>
               <div style={{ fontFamily: T.display, fontSize: 10, fontWeight: 600, color: "#666", textTransform: "uppercase", letterSpacing: "0.05em" }}>{k}</div>
               <div style={{ fontFamily: T.body, fontSize: 14, color: "#ddd", marginTop: 2 }}>{v}</div>
@@ -1912,6 +1954,11 @@ function MobileLayout() {
           ))}
         </div>
       </div>
+      ) : training.active ? (
+        <div style={{ padding: "16px 0", textAlign: "center", fontFamily: T.body, fontSize: 13, color: "rgba(255,255,255,0.35)", marginBottom: 16 }}>
+          No lead captured — start the conversation first
+        </div>
+      ) : null}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
         {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"]].map(([l,ic]) => (
           <button key={l} disabled={!callActive} style={{
@@ -1972,7 +2019,7 @@ function MobileLayout() {
         />
         );
       })}
-      {liveCards.length === 0 && shownResponses < aiResponses.length && (
+      {liveCards.length === 0 && !training.active && shownResponses < aiResponses.length && (
         <div style={{ textAlign: "center", padding: "12px 0" }}>
           <span style={{ fontFamily: T.display, fontSize: 11, color: "rgba(255,255,255,0.2)" }}>
             Tap "Ask AI" for next response...
@@ -1991,7 +2038,7 @@ function MobileLayout() {
         {call.state === "ended" && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#ff8a7b", background: "rgba(231,76,60,0.12)", padding: "1px 5px", borderRadius: 3 }}>● ended</span>}
         {callActive && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: T.green, background: `rgba(${T.greenRgb},0.08)`, padding: "1px 5px", borderRadius: 3 }}>● live</span>}
         {callActive && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
-        {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: `rgba(${T.tealRgb},0.6)`, marginLeft: "auto" }}>Five9 — Maria Garcia</span>}
+        {screenOn && !training.active && <span style={{ fontFamily: T.mono, fontSize: 9, color: `rgba(${T.tealRgb},0.6)`, marginLeft: "auto" }}>Five9 — Maria Garcia</span>}
         {usingLive && !training.active && <button onClick={() => liveAudio.recalibrateSpeakers()} style={{ marginLeft: usingLive && !screenOn ? "auto" : 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.4)" }}>↻ Swap speakers</button>}
         {training.active && callActive && (
           <span style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 9, fontWeight: 700, color: mobilePtt.held ? TRAINING_THEME.primary : "rgba(255,255,255,0.3)", background: mobilePtt.held ? "rgba(255,138,61,0.15)" : "rgba(255,255,255,0.05)", padding: "2px 6px", borderRadius: 3 }}>
@@ -2142,7 +2189,7 @@ function MobileLayout() {
         <div style={{ flex: 1 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: `rgba(${T.greenRgb},0.1)`, borderRadius: 6 }}>
           <Phone size={10} color={T.green} />
-          <span style={{ fontFamily: T.mono, fontSize: 10, color: T.green }}>8:12</span>
+          <span style={{ fontFamily: T.mono, fontSize: 10, color: T.green }}>{formatElapsed(elapsedMs)}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "rgba(255,255,255,0.04)", borderRadius: 6 }}>
           <Shield size={10} color={T.teal} />
@@ -2428,7 +2475,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     setElapsedMs(Date.now() - call.startedAt);
     const id = setInterval(() => {
       setElapsedMs(Date.now() - call.startedAt);
-    }, 30_000);
+    }, 1_000);
     return () => clearInterval(id);
   }, [call.state, call.startedAt, call.endedAt]);
 
@@ -2471,12 +2518,13 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   useLeadContextPush(liveAudio, ctxLead);
   const liveLines = mapLiveTranscripts(liveAudio.transcripts);
   const usingLive = liveLines.length > 0;
+  const trainingFresh = training.active;
   const renderedTranscript = usingLive
     ? liveLines
-    : transcriptLines.slice(0, visibleTranscript);
+    : trainingFresh ? [] : transcriptLines.slice(0, visibleTranscript);
   const latestTranscriptText = usingLive
     ? liveLines[liveLines.length - 1].text
-    : transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text;
+    : trainingFresh ? "" : transcriptLines[Math.min(visibleTranscript - 1, transcriptLines.length - 1)].text;
   const liveCards = liveSuggestionsToCards(liveAudio.suggestions);
   const collapsed = useDraggable(620, 55);
   const expanded = useDraggable(640, 30);
@@ -2512,7 +2560,9 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
     return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
   }, []);
 
-  const peclItems = mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
+  const peclItems = trainingFresh
+    ? DEFAULT_PECL_ITEMS.map(i => ({ ...i, done: false }))
+    : mergePeclItems(DEFAULT_PECL_ITEMS, liveAudio.autoPecl, peclOverrides);
   const peclDone = peclItems.filter(i => i.done).length;
   const mspCovered = peclItems.find(i => i.id === "msp")?.done === true;
   const mspBadge = mspBadgeMode({ elapsedMs, mspCovered });
@@ -2584,11 +2634,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         : "none";
     const statusLabel = callActive ? "CONNECTED" : callEnded ? "CALL ENDED" : "READY";
     const statusColor = callActive ? T.green : callEnded ? "#ff8a7b" : "rgba(255,255,255,0.45)";
-    const elapsedLabel = callActive
-      ? "08:12"
-      : callEnded && call.startedAt && call.endedAt
-        ? formatElapsed(call.endedAt - call.startedAt)
-        : "00:00";
+    const elapsedLabel = formatElapsed(elapsedMs);
     return (
     <div style={{ padding: "8px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -2596,16 +2642,30 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         <span style={{ fontFamily: T.display, fontWeight: 700, fontSize: 12, color: statusColor }}>{statusLabel}</span>
         <span style={{ fontFamily: T.mono, fontSize: 11, color: T.dusk }}>{elapsedLabel}</span>
       </div>
-      <div style={{ fontFamily: T.mono, fontSize: 9, color: "#666", marginBottom: 10 }}>Campaign: AEP_MAPD_FL</div>
+      {!training.active && <div style={{ fontFamily: T.mono, fontSize: 9, color: "#666", marginBottom: 10 }}>Campaign: AEP_MAPD_FL</div>}
+      {training.active && trainingCtxDesktop.scenario && <div style={{ fontFamily: T.mono, fontSize: 9, color: TRAINING_THEME.primary, marginBottom: 10 }}>{trainingCtxDesktop.scenario.title || trainingCtxDesktop.scenario.persona_name}</div>}
       <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: 10, marginBottom: 10 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {[["Caller","Maria Garcia"],["Phone","(954) 555-0142"],["ZIP","33024 — Pembroke Pines, FL"],["DOB","03/15/1952 (Age 74)"],["Coverage","Original Medicare + PDP"],["Lead Source","AllCalls"]].map(([k,v]) => (
-            <div key={k}>
-              <div style={{ fontFamily: T.display, fontSize: 8, fontWeight: 600, color: "#666", textTransform: "uppercase", letterSpacing: "0.05em" }}>{k}</div>
-              <div style={{ fontFamily: T.body, fontSize: 11, color: "#ddd", marginTop: 1 }}>{v}</div>
+        {(() => {
+          const desktopCallFields = training.active
+            ? (trainingCtxDesktop.scenario
+              ? [["Caller", trainingCtxDesktop.scenario.persona_name], trainingCtxDesktop.scenario.persona_age && ["Age", `${trainingCtxDesktop.scenario.persona_age}`], trainingCtxDesktop.scenario.persona_state && ["State", trainingCtxDesktop.scenario.persona_state], trainingCtxDesktop.scenario.medications?.length > 0 && ["Meds", trainingCtxDesktop.scenario.medications.join(", ")]].filter(Boolean)
+              : [])
+            : [["Caller","Maria Garcia"],["Phone","(954) 555-0142"],["ZIP","33024 — Pembroke Pines, FL"],["DOB","03/15/1952 (Age 74)"],["Coverage","Original Medicare + PDP"],["Lead Source","AllCalls"]];
+          return desktopCallFields.length > 0 ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {desktopCallFields.map(([k,v]) => (
+                <div key={k}>
+                  <div style={{ fontFamily: T.display, fontSize: 8, fontWeight: 600, color: "#666", textTransform: "uppercase", letterSpacing: "0.05em" }}>{k}</div>
+                  <div style={{ fontFamily: T.body, fontSize: 11, color: "#ddd", marginTop: 1 }}>{v}</div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          ) : (
+            <div style={{ textAlign: "center", padding: "8px 0", fontFamily: T.body, fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+              No lead captured — start the conversation first
+            </div>
+          );
+        })()}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 10 }}>
         {[["Mute","🎤"],["Hold","⏸️"],["Transfer","↗️"],["Disposition","📋"]].map(([l,ic]) => (
@@ -2640,7 +2700,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         {callEnded && <span style={{ fontFamily: T.mono, fontSize: 8, color: "#ff8a7b", background: "rgba(231,76,60,0.12)", padding: "1px 5px", borderRadius: 3 }}>● ended</span>}
         {callActive && usingLive && <span style={{ fontFamily: T.mono, fontSize: 8, color: T.green, background: `rgba(${T.greenRgb},0.08)`, padding: "1px 5px", borderRadius: 3 }}>● live</span>}
         {callActive && !usingLive && audioOn && BACKEND_WSS_URL && <span style={{ fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.3)" }}>connecting…</span>}
-        {screenOn && <span style={{ fontFamily: T.mono, fontSize: 9, color: `rgba(${T.tealRgb},0.6)`, marginLeft: "auto" }}>Five9 — Maria Garcia, 33024</span>}
+        {screenOn && !training.active && <span style={{ fontFamily: T.mono, fontSize: 9, color: `rgba(${T.tealRgb},0.6)`, marginLeft: "auto" }}>Five9 — Maria Garcia, 33024</span>}
         {usingLive && !training.active && <button onClick={() => liveAudio.recalibrateSpeakers()} style={{ marginLeft: usingLive && !screenOn ? "auto" : 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 8, color: "rgba(255,255,255,0.4)" }}>↻ Swap speakers</button>}
       </div>
       {renderedTranscript.map((line, i) => (
@@ -2661,7 +2721,19 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   const renderDesktopCopilot = () => {
     const resp = liveCards.length > 0
       ? liveCards[liveCards.length - 1]
-      : aiResponses[shownResponses - 1];
+      : trainingFresh ? null : aiResponses[shownResponses - 1];
+    if (!resp) {
+      return (
+        <div>
+          <LeadContextPanel scaledFont={scaledFont} />
+          <div style={{ padding: "40px 14px", textAlign: "center" }}>
+            <div style={{ fontFamily: T.body, fontSize: scaledFont(13), color: "rgba(255,255,255,0.35)", lineHeight: 1.6 }}>
+              Coaching suggestions will appear here once the conversation starts.
+            </div>
+          </div>
+        </div>
+      );
+    }
     // Each pill carries a `field` identifier that maps back to a LeadContext
     // field name. Hovering the pill highlights the matching cell in
     // LeadContextPanel (spec §A3). When no underlying lead field applies
@@ -2796,7 +2868,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
         <SourcesRow sources={sources} />
 
         {/* Response counter — only visible in demo mode */}
-        {!BACKEND_WSS_URL && (
+        {!BACKEND_WSS_URL && !training.active && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
           <span style={{ fontFamily: T.mono, fontSize: 9, color: "rgba(255,255,255,0.18)" }}>{shownResponses} / {aiResponses.length} responses</span>
           {shownResponses < aiResponses.length && (
@@ -2891,7 +2963,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
   if (mode === "collapsed") {
     const latestResp = liveCards.length > 0
       ? liveCards[liveCards.length - 1]
-      : aiResponses[shownResponses - 1];
+      : trainingFresh ? null : aiResponses[shownResponses - 1];
     return (
       <div onMouseDown={collapsed.onMouseDown} style={{
         position: "absolute", left: collapsed.pos.x, top: collapsed.pos.y,
@@ -2934,6 +3006,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
 
         {/* Scrollable content */}
         <div data-no-drag="true" style={{ flex: 1, overflowY: "auto", padding: "0 12px 6px", cursor: "default" }}>
+          {latestResp ? (<>
           {/* Transcript snippet */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", marginBottom: 6, background: "rgba(255,255,255,0.03)", borderRadius: 6, borderLeft: `2px solid rgba(${T.greenRgb},0.4)` }}>
             <Volume2 size={10} color="rgba(255,255,255,0.3)" />
@@ -2949,6 +3022,11 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
             <div style={{ fontFamily: T.display, fontSize: 8, fontWeight: 700, color: T.teal, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Say this:</div>
             <div style={{ fontFamily: T.body, fontSize: scaledFont(12), color: `rgba(255,255,255,${Math.min(opacity + 0.1, 0.95)})`, lineHeight: 1.55 }}>{latestResp.sayThis}</div>
           </div>
+          </>) : (
+          <div style={{ padding: "20px 8px", textAlign: "center", fontFamily: T.body, fontSize: scaledFont(11), color: "rgba(255,255,255,0.3)" }}>
+            Waiting for conversation...
+          </div>
+          )}
         </div>
 
         {/* Input bar */}
@@ -3025,7 +3103,7 @@ function MediCopilotOverlay({ mode, setMode, opacity }) {
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", background: `rgba(${T.greenRgb},0.1)`, borderRadius: 6 }}>
             <Phone size={10} color={T.green} />
-            <span style={{ fontFamily: T.mono, fontSize: 10, color: T.green }}>8:12</span>
+            <span style={{ fontFamily: T.mono, fontSize: 10, color: T.green }}>{formatElapsed(elapsedMs)}</span>
           </div>
           <button data-no-drag="true" onClick={cycleTextSize} title={`Text: ${Math.round(textScale * 100)}%`} style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, cursor: "pointer", padding: "2px 6px", marginRight: 2 }}>
             <span style={{ fontFamily: T.display, fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>A</span>
@@ -3421,6 +3499,14 @@ export default function MacOSDesktopMockup() {
   const [showScenarioPicker, setShowScenarioPicker] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const prevCallState = useRef(call.state);
+  const [fiveElapsedMs, setFiveElapsedMs] = useState(0);
+  useEffect(() => {
+    if (call.state === "idle" || !call.startedAt) { setFiveElapsedMs(0); return; }
+    if (call.state === "ended" && call.endedAt) { setFiveElapsedMs(call.endedAt - call.startedAt); return; }
+    setFiveElapsedMs(Date.now() - call.startedAt);
+    const id = setInterval(() => setFiveElapsedMs(Date.now() - call.startedAt), 1_000);
+    return () => clearInterval(id);
+  }, [call.state, call.startedAt, call.endedAt]);
 
   // Show scenario picker when training mode is activated and no session started
   useEffect(() => {
@@ -3462,7 +3548,7 @@ export default function MacOSDesktopMockup() {
         <div style={{ position: "absolute", bottom: "20%", right: "30%", width: 300, height: 300, borderRadius: "50%", background: "rgba(244,124,110,0.06)", filter: "blur(60px)" }} />
       </div>
       <MacMenuBar />
-      <Five9Window callState={call.state} onStartCall={call.start} onEndCall={call.end} />
+      {!training.active && <Five9Window callState={call.state} onStartCall={call.start} onEndCall={call.end} elapsedMs={fiveElapsedMs} />}
       <MediCopilotOverlay mode={mode} setMode={setMode} opacity={opacity} />
       <MacDock />
       <div style={{ position: "absolute", top: 32, left: "50%", transform: "translateX(-50%)", padding: "4px 12px", background: "rgba(0,0,0,0.5)", borderRadius: 8, fontFamily: T.display, fontSize: 11, color: "rgba(255,255,255,0.5)" }}>

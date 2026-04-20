@@ -31,6 +31,48 @@ function DifficultyBadge({ difficulty }) {
   );
 }
 
+function FreePracticeCard({ onSelect }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={() => onSelect(null)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        textAlign: "left", width: "100%", padding: 16, borderRadius: 12,
+        border: `1px solid ${hover ? "#8B5CF6" : "rgba(255,255,255,0.08)"}`,
+        background: hover ? "rgba(139,92,246,0.08)" : "rgba(255,255,255,0.03)",
+        cursor: "pointer", transition: "all 0.2s",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{
+          display: "inline-block", padding: "2px 8px", borderRadius: 6,
+          fontSize: 10, fontWeight: 700, fontFamily: "'Montserrat', sans-serif",
+          letterSpacing: "0.04em",
+          background: "rgba(139,92,246,0.15)",
+          color: "#8B5CF6",
+          border: "1px solid rgba(139,92,246,0.3)",
+        }}>
+          Free Practice
+        </span>
+      </div>
+      <div style={{
+        fontFamily: "'Montserrat', sans-serif", fontSize: 13, fontWeight: 700,
+        color: "#fff", marginBottom: 6,
+      }}>
+        No Lead Info — Open Practice
+      </div>
+      <div style={{
+        fontFamily: "'Lora', serif", fontSize: 12, color: "rgba(255,255,255,0.6)",
+        lineHeight: 1.5,
+      }}>
+        Practice without a scenario or lead context. Good for testing the AI coaching with your own flow.
+      </div>
+    </button>
+  );
+}
+
 function ScenarioCard({ scenario, onSelect }) {
   const [hover, setHover] = useState(false);
   return (
@@ -131,6 +173,10 @@ export function ScenarioPicker({ onSelect }) {
           }}>
             Hi {testerName} — pick a persona to practice with
           </div>
+        </div>
+
+        <div style={{ marginBottom: 24 }}>
+          <FreePracticeCard onSelect={onSelect} />
         </div>
 
         {loading && (

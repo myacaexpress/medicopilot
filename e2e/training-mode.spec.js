@@ -78,11 +78,52 @@ test.describe("training mode", () => {
     await expect(toggle).toContainText("TRAINING");
 
     await page.getByRole("button", { name: /Start Call/i }).first().click();
-    await expect(page.getByText(/CONNECTED/i).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /End Call/i }).first()).toBeVisible();
     await page.getByRole("button", { name: /End Call/i }).first().click();
-    await expect(page.getByText(/CALL ENDED/i).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /Start New|Start Call/i }).first()).toBeVisible();
 
     await expect(toggle).toContainText("TRAINING");
+  });
+
+  test("free practice shows empty lead context, not Maria Garcia", async ({ page }) => {
+    await installAllMocks(page);
+    await setupTrainingMocks(page);
+    // Seed a captured lead in localStorage to test that training mode ignores it
+    await page.addInitScript(() => {
+      localStorage.setItem("medicopilot_active_lead", JSON.stringify({
+        id: "stale", source: "vision",
+        fields: { firstName: { v: "Maria", confidence: "high" }, lastName: { v: "Garcia", confidence: "high" } },
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      }));
+    });
+    await page.goto("/");
+
+    // Activate training and pick free practice
+    await page.getByTestId("training-toggle").first().click();
+    await expect(page.getByText("Choose a Scenario")).toBeVisible();
+    await page.getByText("No Lead Info").click();
+
+    // Start call
+    await page.getByRole("button", { name: /Start Call/i }).first().click();
+    await expect(page.getByRole("button", { name: /End Call/i }).first()).toBeVisible();
+
+    // Lead context panel should show empty state
+    await expect(page.getByText("No lead captured")).toBeVisible();
+
+    // Maria Garcia demo data must NOT appear
+    await expect(page.getByText("Maria Garcia")).not.toBeVisible();
+  });
+
+  test("scenario lead shows persona data, not Maria Garcia", async ({ page }) => {
+    await installAllMocks(page);
+    await setupTrainingMocks(page);
+    await page.goto("/");
+
+    await activateTrainingAndPickScenario(page);
+
+    // Lead context should show scenario persona
+    await expect(page.getByText("Test Person").first()).toBeVisible();
+    await expect(page.getByText("Maria Garcia")).not.toBeVisible();
   });
 });
 
@@ -95,7 +136,7 @@ test.describe("push-to-talk", () => {
     await activateTrainingAndPickScenario(page);
 
     await page.getByRole("button", { name: /Start Call/i }).first().click();
-    await expect(page.getByText(/CONNECTED/i).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /End Call/i }).first()).toBeVisible();
 
     await expect(page.getByTestId("ptt-mic-button").first()).toBeVisible();
     await expect(page.getByTestId("ptt-hint").first()).toBeVisible();
@@ -110,7 +151,7 @@ test.describe("push-to-talk", () => {
     await activateTrainingAndPickScenario(page);
 
     await page.getByRole("button", { name: /Start Call/i }).first().click();
-    await expect(page.getByText(/CONNECTED/i).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /End Call/i }).first()).toBeVisible();
 
     await expect(page.getByTestId("ptt-indicator").first()).toContainText("Client speaking");
 
