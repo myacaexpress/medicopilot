@@ -40,7 +40,7 @@ Each ADR is a one-liner. Detailed rationale lives in the PRD body and the origin
 - **ADR-020** — Buffer timer visible to agent in softphone. `lead_charge` rows fire at threshold for independent agents (Stripe in P3+).
 - **ADR-021** — Product pack pattern — Medicare is one pack; FE, ACA, Health, Life are pluggable. Medicare ships first; others = greyed-out tabs at MVP.
 - **ADR-022** — Tesla blinker — agent-initiated transition (button) + AI-initiated opportunity hints (passive badges). Cross-vertical mode switch is always agent-confirmed.
-- **ADR-023** — Live transfer vs direct inbound — vendor config flag drives AI opening behavior.
+- **ADR-023** — *(superseded by ADR-013; see canonical decision there. Originally captured separately during the routing-brain grill before consolidation.)*
 - **ADR-024** — Adjustable signal density — per-agent toggle catalog with 4 presets (Trainee/Standard/Veteran/Stealth), hotkey switching (⌥1–4), role-based admin locks. Engine emits everything; client filters; audit records what was suppressed.
 
 ## Data layer
@@ -105,7 +105,7 @@ Each ADR is a one-liner. Detailed rationale lives in the PRD body and the origin
 - **ADR-064** — Code signing + notarization mandatory; GitHub Actions CI pipeline.
 - **ADR-065** — Auto-update via Tauri updater; 30-day force-upgrade window with banner warnings at 14d and 7d.
 - **ADR-066** — Tier 0 Gemma model distributed separately on first launch (~3.5 GB); versioned independently from app binary.
-- **ADR-067** — PHI at rest — FileVault required, app sandbox, encrypted cache via Keychain, 8hr inactivity timeout, cache wipe on logout.
+- **ADR-067** — PHI at rest — FileVault required, app sandbox, encrypted cache via Keychain, 8-hour inactivity timeout, cache wipe on logout.
 - **ADR-068** — Agent offboarding — backend revoke + client-side wipe + audit log; optional MDM hard-wipe (Phase 2 if TriBe crosses ~20 agents).
 - **ADR-069** — Crash reporting via Cloud Error Reporting; PHI scrubbed via Policy B before upload.
 

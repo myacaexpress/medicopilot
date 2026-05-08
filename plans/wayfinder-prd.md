@@ -96,7 +96,7 @@ Wayfinder is **one Mac app + one web app**. The Mac app is the live-call surface
 - **One stack replaces 5–7 disconnected tools.** Five9, separate quoting tools, separate CRM, separate compliance docs, separate e-enrollment systems all collapse into Wayfinder + HealthSherpa. (HealthSherpa stays as the Medicare e-enrollment back end because they're free and cover 89% of MA market — but Wayfinder owns everything else.)
 - **Cost drops from $1,500–2,000/mo (just for Five9) to ~$365–525/mo all-in at 3 agents** (or ~$820–940/mo at 10 agents). Ad spend and operations stay separate — those don't compound into the tooling stack.
 - **Compliance becomes proactive.** Recording is mandatory and tamper-evident. Audit log is queryable. CMS audit response is a 30-second query, not a week of fire drill. Carrier vendor questionnaires answered from pre-built templates auto-populated from the audit infrastructure.
-- **Lead-vendor ROI becomes legible.** Per-vendor real-time spend, persistency-aware ROI (factoring in 30/90/365-day enrollment retention), dispute queue, day-of-week/hour-of-day patterns. Bad vendors are visible immediately; good vendors get more spend allocated.
+- **Lead-vendor ROI becomes legible.** Per-vendor live spend (live-summed from `calls` and `lead_charge` rows), persistency-aware ROI (factoring in 30/90/365-day enrollment retention from the nightly-refreshed `vendor_metrics_daily` materialized view), dispute queue, day-of-week/hour-of-day patterns. Bad vendors are visible same-day; good vendors get more spend allocated.
 - **Multi-product is configuration, not new tooling.** Wayfinder is product-agnostic at the architecture level. Medicare ships first; FE / ACA / Life slot in via "product packs" (compliance catalog, trigger set, coaching style, schema extensions) — not separate apps.
 - **Recruiting becomes differentiated.** TriBe's recruiting pitch becomes: *"work at TriBe, get tools no other agency has."* On-device AI coaching, blinker-style cross-sell support, integrated compliance — competitors can't replicate quickly.
 - **HIPAA defense compounds.** Single-cloud GCP under one BAA, plus Postmark and Telnyx (3 BAAs total). Field-level encryption for MBI/SSN/DOB. Centralized redaction policy. Tamper-evident audit log. Defensible at scale.
@@ -231,14 +231,14 @@ Numbered exhaustively across nine personas. User stories are written in the form
 81. **As an admin**, when I terminate an agent, their session tokens are revoked, their Mac app's local cache is wiped on next launch, and they cannot receive new calls; their historical recordings remain in retention but inaccessible to them.
 82. **As an admin**, I can bulk-import a CSV of contacts from a spreadsheet or another CRM into the contacts table — the import process surfaces dedup matches before I confirm.
 83. **As an admin**, when an agent's license expires mid-call, the active call completes, but no new calls route to them until the license is renewed and synced.
-84. **As an admin**, I can grant a Mac app version of Wayfinder via the internal portal — the agent downloads via signed GCS URL after passing license + AHIP gates.
+84. **As an admin**, I can grant a Mac app version of Wayfinder via the internal portal — when the agent clicks Download, the backend re-issues a fresh short-lived V4 signed GCS URL (15 minutes) per request after passing license + AHIP gates. The bucket is private; URLs are minted on demand.
 
 ### Persona H: Admin configuring a new lead vendor
 
 85. **As an admin**, I can add a new lead vendor (Ringba / AllCalls / Trackdrive / etc.) by entering their ping endpoint secret, products accepted, buffer seconds, cost per billable call, return window, default call type (live transfer or direct inbound), and stripe_passthrough flag.
 86. **As an admin**, after adding a vendor, I can enable/disable per-state, per-product routing rules.
 87. **As an admin**, the vendor's ping log shows me every ping received, the decision (accept/reject), reject reason, and ping response time — useful for debugging slow responses or wrong-rule rejections.
-88. **As an admin**, the vendor performance dashboard shows me real-time spend, ROI, persistency rates, dispute queue — I can see vendor health at a glance.
+88. **As an admin**, the vendor performance dashboard shows me live spend (sum of `calls.cost` for today, refreshed every 60 seconds via Cloud Run streaming) plus daily-refreshed historical metrics (ROI, persistency rates, qualified rate) from the `vendor_metrics_daily` materialized view. Today's spend is current-to-the-minute; trend metrics are end-of-yesterday. The dispute queue is real-time. I can see vendor health at a glance.
 89. **As an admin**, I can manually file a dispute for a specific call (wrong state, voicemail, language barrier) — submitting one-click where the vendor portal supports it.
 90. **As an admin**, when a vendor's 7-day ROI drops below threshold, I see an alert recommending pause/throttle — but the system never auto-throttles at MVP; I make the call.
 91. **As an admin**, I can configure per-vendor commission auto-pull (Phase 2) or manual monthly CSV upload for commission ledger entries.
@@ -250,7 +250,7 @@ Numbered exhaustively across nine personas. User stories are written in the form
 94. **As an admin**, the export includes a 6-year accounting-of-disclosures: who looked at which fields, when, and for what purpose.
 95. **As an admin**, the recording-retention rule means I cannot delete the contact's data within 10 years even if the beneficiary requests deletion — I document the refusal with rationale.
 96. **As an admin**, if the beneficiary requests amendment of a specific field, I can update most fields with an amendment note attached — recordings cannot be amended (CMS rule wins) but an amendment note is appended to the record.
-97. **As an admin**, the export is encrypted in transit (signed GCS URL with 30-day expiry) so the beneficiary can download securely.
+97. **As an admin**, the export is delivered through an authenticated download portal: the beneficiary authenticates (OTP to phone or email on file), and the backend mints a fresh V4 signed GCS URL (15 minutes) per access. The portal page remains accessible for 30 days, but each underlying download URL is short-lived. (V4 signed URLs cap at 7 days per GCS; we re-mint on demand rather than issuing a single long-lived URL.)
 
 ---
 
@@ -258,7 +258,7 @@ Numbered exhaustively across nine personas. User stories are written in the form
 
 ### Module map
 
-```
+```text
 wayfinder/
 ├── apps/
 │   ├── mac/                         # Tauri 2.x Mac app (live-call surface)
@@ -341,7 +341,7 @@ wayfinder/
 
 **System prompt structure** (Tier 0):
 
-```
+```text
 You are an on-device coaching helper for a Medicare insurance agent on a live call. Output is ONE of:
   - acknowledgment(text: string)         # ≤10 words, no PHI echo
   - verbatim_progress(item: string, percent: int)
@@ -373,7 +373,7 @@ Rules:
 
 **System prompt structure** (Tier 2):
 
-```
+```text
 You are a senior Medicare sales agent coaching a newer agent in real-time during a live call. Coach via the emit_suggestion tool, never via free-form text. Be warm, fast, contraction-using, ≤60 words.
 
 The user message contains:
@@ -417,7 +417,7 @@ Coach naturally. NEVER echo MBI, SSN, full DOB, full address, payment info. NEVE
 
 **Tool calls available to Tier 2:**
 
-```
+```text
 lookup_drug(plan_id: str, drug_name: str | ndc: str)
   → returns: {tier: int, copay_30d: float, copay_90d_mail: float|null, restrictions: [str], alternates: [{drug_name, tier, copay}]}
 
@@ -451,7 +451,7 @@ Each tool call resolves <300ms cached, <800ms uncached. Tools are wrapped behind
 
 **In-session pseudonyms (consistent within a call):**
 
-```
+```text
 Original transcript:        "Hi Mary, what medications are you taking?"
 Redactor (Policy A):        "Hi PERSON_1, what medications are you taking?"
                             (Mary → PERSON_1 mapping stored in encrypted session map)
@@ -465,7 +465,7 @@ The session pseudonym map is an encrypted Postgres table indexed by session_id. 
 
 #### Verbatim catalog — no LLM in compliance-critical path
 
-```
+```text
 verbatim_catalog/
 ├── tpmo.json
 ├── pecl_pre_enrollment.json
@@ -499,7 +499,7 @@ When triggered, Tier 2 receives `verbatim_id: "TPMO"` and renders the canonical 
 
 #### PECL state machine
 
-```
+```text
 PECL_ITEMS: [TPMO, MSP, LIS, MEDIGAP, SOA]
 
 State per call:
@@ -855,7 +855,7 @@ Hash chain: every event's `prev_event_hash` = sha256(previous row). Hourly job w
 
 **Accuracy rubric (Vertex Flash-Lite as judge):**
 
-```
+```text
 You are evaluating an AI coaching suggestion against the ground truth lookup result. Compare the suggestion's claims about plan benefits, drug copays, provider network status, etc. against the lookup_* tool results from the same session.
 
 Score 0-100 on accuracy:
@@ -870,7 +870,7 @@ Output JSON: {score: int, rationale: str, errors: [str]}
 
 **Compliance rubric:**
 
-```
+```text
 Score 0-100 on CMS compliance:
   100 = no violations; verbatim text rendered word-perfect when triggered
   -10 per: comparative claim about a carrier ("Humana is better than Aetna")
@@ -886,7 +886,7 @@ Output JSON: {score: int, violations: [str], rationale: str}
 
 **Tone rubric:**
 
-```
+```text
 Score 0-100 on coaching tone:
   100 = warm, contraction-using, ≤60 words, sounds like a person
   90  = mostly natural; one stiff phrase
@@ -1107,6 +1107,7 @@ CREATE TABLE lead_vendors (
 
 CREATE TABLE ping_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID,                                   -- set when decision='accept'; correlates to calls.session_id
   vendor_id UUID NOT NULL REFERENCES lead_vendors(id),
   received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   vendor_request_id TEXT,
@@ -1117,10 +1118,28 @@ CREATE TABLE ping_log (
   response_ms INT
 );
 
+CREATE TABLE calls (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL UNIQUE,                   -- correlation key with ping_log.session_id
+  vendor_id UUID REFERENCES lead_vendors(id),
+  contact_id UUID REFERENCES contacts(id),
+  agent_id UUID NOT NULL,
+  call_type TEXT NOT NULL,                           -- inbound | outbound
+  call_started_at TIMESTAMPTZ NOT NULL,              -- SIP-ANSWER timestamp
+  call_ended_at TIMESTAMPTZ,
+  billable_at TIMESTAMPTZ,                            -- buffer-cross timestamp for vendor billing
+  cost DECIMAL(10, 2),                                -- vendor charge for this call
+  disposition TEXT,                                   -- qualified | not_qualified | callback | DNC | wrong_number | language | abandoned
+  outcome TEXT,                                       -- enrolled | no_sale | callback_scheduled | escalated
+  enrollment_date DATE,                               -- if outcome=enrolled
+  recording_uri TEXT,                                  -- gs:// path to recording bucket
+  transcript_uri TEXT
+);
+
 CREATE TABLE vendor_disputes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  call_id UUID NOT NULL,
-  vendor_id UUID NOT NULL,
+  call_id UUID NOT NULL REFERENCES calls(id),
+  vendor_id UUID NOT NULL REFERENCES lead_vendors(id),
   dispute_reason TEXT NOT NULL,
   submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at TIMESTAMPTZ,
@@ -1130,27 +1149,27 @@ CREATE TABLE vendor_disputes (
 
 CREATE MATERIALIZED VIEW vendor_metrics_daily AS
   SELECT
-    vendor_id,
-    DATE(received_at) AS metric_date,
-    COUNT(*) FILTER (WHERE decision = 'accept') AS calls_received,
-    COUNT(*) FILTER (WHERE billable_at IS NOT NULL) AS calls_billable,
-    SUM(cost) FILTER (WHERE billable_at IS NOT NULL) AS billable_cost,
-    COUNT(*) FILTER (WHERE outcome = 'enrolled' AND DATE(enrollment_date) - DATE(received_at) <= 0) AS same_call_enrollments,
-    SUM(commission_amount) FILTER (WHERE persisted_30d = true) AS commission_realized_30d,
-    SUM(commission_amount) FILTER (WHERE persisted_90d = true) AS commission_realized_90d,
-    AVG(EXTRACT(EPOCH FROM (call_ended_at - call_started_at))) AS avg_call_duration_s,
-    COUNT(*) FILTER (WHERE disposition = 'qualified') / COUNT(*)::float AS qualified_rate
+    p.vendor_id,
+    DATE(p.received_at) AS metric_date,
+    COUNT(*) FILTER (WHERE p.decision = 'accept') AS calls_received,
+    COUNT(*) FILTER (WHERE c.billable_at IS NOT NULL) AS calls_billable,
+    SUM(c.cost) FILTER (WHERE c.billable_at IS NOT NULL) AS billable_cost,
+    COUNT(*) FILTER (WHERE c.outcome = 'enrolled' AND c.enrollment_date IS NOT NULL AND c.enrollment_date - DATE(p.received_at) <= 0) AS same_call_enrollments,
+    SUM(cp.commission_amount) FILTER (WHERE cp.persisted_30d = true) AS commission_realized_30d,
+    SUM(cp.commission_amount) FILTER (WHERE cp.persisted_90d = true) AS commission_realized_90d,
+    AVG(EXTRACT(EPOCH FROM (c.call_ended_at - c.call_started_at))) AS avg_call_duration_s,
+    COUNT(*) FILTER (WHERE c.disposition = 'qualified')::float / NULLIF(COUNT(*), 0) AS qualified_rate
   FROM ping_log p
   LEFT JOIN calls c USING (session_id)
   LEFT JOIN contact_products cp ON cp.contact_id = c.contact_id
-  GROUP BY vendor_id, DATE(received_at);
+  GROUP BY p.vendor_id, DATE(p.received_at);
 ```
 
-Refresh nightly. Materialized view powers the lead-vendor performance dashboard.
+Refresh nightly. Powers the **historical / trend** sections of the lead-vendor performance dashboard. Live (today's) spend on the dashboard is computed at query-time directly from `calls` (current-to-the-minute), not from this view.
 
 #### Buffer timer state machine
 
-```
+```text
 states:
   pre_buffer:                       # [0, buffer_seconds)
     UI: "Billable in 0:23" green countdown
@@ -1171,7 +1190,7 @@ For independent agents (`stripe_passthrough = true`), every billable-cross write
 
 #### Auto-callback flow (agent WebRTC drop)
 
-```
+```text
 event: SIP BYE on agent leg, no ENROLL_COMPLETE
        call_state = "agent_disconnected"
        caller_state = still on_call
@@ -1225,12 +1244,12 @@ Content-Type: application/json
     {
       "name": "Eliquis",
       "ndc": "0056-0117",
-      "id_source": "npi"
+      "id_source": "ndc"
     },
     {
       "name": "Lisinopril",
       "ndc": "0093-0192",
-      "id_source": "npi"
+      "id_source": "ndc"
     }
   ],
   "providers": [
